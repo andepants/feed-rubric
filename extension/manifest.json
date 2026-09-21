@@ -7,6 +7,7 @@
   "host_permissions": [
     "https://x.com/*",
     "https://twitter.com/*",
+    "https://api.typesafe.ai/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],

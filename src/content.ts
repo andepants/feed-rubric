@@ -1,4 +1,9 @@
-import { applyHideState } from "./hide.js";
+import {
+  applyHideState,
+  createPlaceholder,
+  removePlaceholder,
+  UNDO_CLASS,
+} from "./hide.js";
 import { isHtmlElement, isRecord } from "./guard.js";
 import { parseFixtureScores, parseScoreMap } from "./score.js";
 import {
@@ -35,6 +40,15 @@ function parseClassifyResult(value: unknown): ClassifyResult | undefined {
   };
 }
 
+function debugDetail(result: ClassifyResult, debug: boolean): string | undefined {
+  if (!debug) return undefined;
+  return Object.entries(result.scores)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 2)
+    .map(([k, v]) => `${k}:${v.toFixed(2)}`)
+    .join(" ");
+}
+
 async function requestClassification(
   article: HTMLElement,
   postId: string,
@@ -57,7 +71,7 @@ async function requestClassification(
 
   try {
     const response: unknown = await chrome.runtime.sendMessage(message);
-    applyResult(article, parseClassifyResult(response));
+    await applyResult(article, parseClassifyResult(response));
   } catch (err) {
     console.warn("[feed-rubric] message failed:", err);
   } finally {
@@ -65,44 +79,36 @@ async function requestClassification(
   }
 }
 
-function applyResult(
-  article: HTMLElement,
-  result: ClassifyResult | undefined,
-): void {
-  if (!result) return;
-
-  article.querySelector(".feed-rubric-debug-chip")?.remove();
-  applyHideState({ article, hide: result.hide });
-
-  if (result.hide) {
-    void maybeShowDebugChip(article, result);
-  }
+function mountPlaceholder(article: HTMLElement, result: ClassifyResult, debug: boolean): void {
+  removePlaceholder(article);
+  const row = createPlaceholder({
+    document: article.ownerDocument,
+    reasons: result.reasons,
+    debugDetail: debugDetail(result, debug),
+  });
+  const undo = row.querySelector(`.${UNDO_CLASS}`);
+  undo?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    applyHideState({ article, hide: false });
+    removePlaceholder(article);
+  });
+  article.prepend(row);
 }
 
-async function maybeShowDebugChip(
+async function applyResult(
   article: HTMLElement,
-  result: ClassifyResult,
+  result: ClassifyResult | undefined,
 ): Promise<void> {
-  const stored = await chrome.storage.local.get("debug");
-  if (stored.debug !== true) return;
+  if (!result) return;
 
-  const chip = document.createElement("button");
-  chip.className = "feed-rubric-debug-chip";
-  chip.type = "button";
-  chip.title = "feed-rubric: click to unhide";
-  const top = Object.entries(result.scores)
-    .sort(([, a], [, b]) => b - a)
-    .slice(0, 2)
-    .map(([k, v]) => `${k}:${v.toFixed(2)}`)
-    .join(" ");
-  chip.textContent = `hidden · ${result.reasons.join(", ")} · ${top}`;
-  chip.addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyHideState({ article, hide: false });
-    chip.remove();
-  });
-  article.style.position ||= "relative";
-  article.appendChild(chip);
+  removePlaceholder(article);
+  applyHideState({ article, hide: result.hide });
+
+  if (!result.hide) return;
+
+  const stored = await chrome.storage.local.get("debug");
+  mountPlaceholder(article, result, stored.debug === true);
 }
 
 const observer = new IntersectionObserver(
@@ -123,6 +129,11 @@ const observer = new IntersectionObserver(
 function observeTweet(article: HTMLElement): void {
   if (observed.has(article)) return;
   observed.add(article);
+  if (isFixtureHost()) {
+    const postId = extractPostId(article);
+    if (postId) void requestClassification(article, postId);
+    return;
+  }
   observer.observe(article);
 }
 

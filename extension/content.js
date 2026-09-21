@@ -1,10 +1,35 @@
 // src/hide.ts
 var HIDE_ATTR = "data-feed-rubric-hide";
+var PLACEHOLDER_CLASS = "feed-rubric-placeholder";
+var UNDO_CLASS = "feed-rubric-undo";
 function applyHideState(args) {
   if (args.hide) {
     args.article.setAttribute(HIDE_ATTR, "true");
   } else {
     args.article.removeAttribute(HIDE_ATTR);
+  }
+}
+function placeholderSummary(reasons) {
+  const label = reasons.length > 0 ? reasons.join(", ") : "rubric";
+  return `Hidden \xB7 ${label}`;
+}
+function createPlaceholder(args) {
+  const row = args.document.createElement("div");
+  row.className = PLACEHOLDER_CLASS;
+  const text = args.document.createElement("span");
+  const summary = placeholderSummary(args.reasons);
+  text.textContent = args.debugDetail ? `${summary} \xB7 ${args.debugDetail}` : summary;
+  const undo = args.document.createElement("button");
+  undo.type = "button";
+  undo.className = UNDO_CLASS;
+  undo.textContent = "Undo";
+  row.append(text, undo);
+  return row;
+}
+function removePlaceholder(article) {
+  const nodes = article.querySelectorAll(`.${PLACEHOLDER_CLASS}`);
+  for (const node of nodes) {
+    node.remove();
   }
 }
 
@@ -45,33 +70,21 @@ function parseFixtureScores(raw) {
 
 // src/sites/x.ts
 var PLATFORM = "x";
-var SELECTORS = {
-  /**
-   * Timeline tweet card. X uses `<article data-testid="tweet">` for home,
-   * notifications, and status pages. Fixture timeline copies this.
-   */
-  tweet: 'article[data-testid="tweet"]',
-  /**
-   * Tweet body. Quote-tweets may contain more than one; we join them.
-   */
-  tweetText: '[data-testid="tweetText"]',
-  /**
-   * Author name/handle cluster in the tweet header.
-   */
-  userName: '[data-testid="User-Name"]',
-  /**
-   * Profile link inside the name cluster (`href="/handle"`, role=link).
-   */
-  userLink: 'a[href^="/"][role="link"]',
-  /**
-   * Timestamp node inside the permalink. X wraps `<time>` in
-   * `a[href*="/status/{id}"]`.
-   */
-  statusTime: 'a[href*="/status/"] time',
-  /**
-   * Fallback permalink if `<time>` is missing from the article.
-   */
-  statusLink: 'a[href*="/status/"]'
+var SELECTOR_CHAINS = {
+  tweet: [
+    'article[data-testid="tweet"]',
+    'div[data-testid="cellInnerDiv"] article',
+    'article[role="article"]'
+  ],
+  tweetText: [
+    '[data-testid="tweetText"]',
+    'div[data-testid="tweetText"]',
+    '[data-testid="tweet"] div[lang]',
+    "div[lang]"
+  ],
+  userName: ['[data-testid="User-Name"]', '[data-testid="User-Names"]'],
+  userLink: ['a[href^="/"][role="link"]', 'a[href^="/"]'],
+  status: ['a[href*="/status/"] time', 'a[href*="/status/"]', "time"]
 };
 function queryEl(root, selector) {
   if (!root) return null;
@@ -88,6 +101,30 @@ function queryAll(root, selector) {
   } catch {
     return [];
   }
+}
+function queryFirstInChain(root, selectors) {
+  for (const selector of selectors) {
+    const el = queryEl(root, selector);
+    if (el) return el;
+  }
+  return null;
+}
+function queryAllInChain(root, selectors) {
+  for (const selector of selectors) {
+    const els = queryAll(root, selector);
+    if (els.length > 0) return els;
+  }
+  return [];
+}
+function matchesAny(node, selectors) {
+  for (const selector of selectors) {
+    try {
+      if (node.matches(selector)) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 function elementText(el) {
   if (!el) return "";
@@ -108,29 +145,33 @@ function parseHandleFromHref(href) {
   return `@${trimmed}`;
 }
 function findTweetArticles(root) {
-  return queryAll(root, SELECTORS.tweet).filter(isHtmlElement);
+  return queryAllInChain(root, SELECTOR_CHAINS.tweet).filter(isHtmlElement);
 }
 function isTweetArticle(node) {
-  return isHtmlElement(node) && node.matches(SELECTORS.tweet);
+  return isHtmlElement(node) && matchesAny(node, SELECTOR_CHAINS.tweet);
+}
+function statusIdFromNode(node) {
+  if (!node) return null;
+  const hrefSelf = node.getAttribute("href");
+  const fromSelf = hrefSelf ? parseStatusId(hrefSelf) : null;
+  if (fromSelf) return fromSelf;
+  const link = node.closest("a");
+  const href = link?.getAttribute("href");
+  return href ? parseStatusId(href) : null;
 }
 function extractPostId(article) {
   if (!isHtmlElement(article)) return null;
-  const timeEl = queryEl(article, SELECTORS.statusTime);
-  const timeLink = timeEl?.closest("a");
-  if (timeLink) {
-    const href2 = timeLink.getAttribute("href");
-    const id = href2 ? parseStatusId(href2) : null;
+  for (const selector of SELECTOR_CHAINS.status) {
+    const id = statusIdFromNode(queryEl(article, selector));
     if (id) return id;
   }
-  const fallback = queryEl(article, SELECTORS.statusLink);
-  const href = fallback?.getAttribute("href");
-  return href ? parseStatusId(href) : null;
+  return null;
 }
 function extractAuthor(article) {
   if (!isHtmlElement(article)) return "@unknown";
-  const nameBlock = queryEl(article, SELECTORS.userName);
+  const nameBlock = queryFirstInChain(article, SELECTOR_CHAINS.userName);
   if (!isHtmlElement(nameBlock)) return "@unknown";
-  const handleLink = queryEl(nameBlock, SELECTORS.userLink) ?? queryEl(nameBlock, 'a[href^="/"]');
+  const handleLink = queryFirstInChain(nameBlock, SELECTOR_CHAINS.userLink);
   const href = handleLink?.getAttribute("href");
   const fromHref = href ? parseHandleFromHref(href) : null;
   if (fromHref) return fromHref;
@@ -140,7 +181,7 @@ function extractAuthor(article) {
 }
 function extractText(article) {
   if (!isHtmlElement(article)) return "";
-  const parts = queryAll(article, SELECTORS.tweetText).filter(isHtmlElement).map((el) => elementText(el)).filter((text) => text.length > 0);
+  const parts = queryAllInChain(article, SELECTOR_CHAINS.tweetText).filter(isHtmlElement).map((el) => elementText(el)).filter((text) => text.length > 0);
   if (parts.length > 0) return parts.join("\n\n");
   return elementText(article).slice(0, 500);
 }
@@ -171,6 +212,10 @@ function parseClassifyResult(value) {
     scores: parseScoreMap(result.scores) ?? {}
   };
 }
+function debugDetail(result, debug) {
+  if (!debug) return void 0;
+  return Object.entries(result.scores).sort(([, a], [, b]) => b - a).slice(0, 2).map(([k, v]) => `${k}:${v.toFixed(2)}`).join(" ");
+}
 async function requestClassification(article, postId) {
   if (pending.has(postId)) return;
   const text = extractText(article);
@@ -186,37 +231,36 @@ async function requestClassification(article, postId) {
   };
   try {
     const response = await chrome.runtime.sendMessage(message);
-    applyResult(article, parseClassifyResult(response));
+    await applyResult(article, parseClassifyResult(response));
   } catch (err) {
     console.warn("[feed-rubric] message failed:", err);
   } finally {
     pending.delete(postId);
   }
 }
-function applyResult(article, result) {
-  if (!result) return;
-  article.querySelector(".feed-rubric-debug-chip")?.remove();
-  applyHideState({ article, hide: result.hide });
-  if (result.hide) {
-    void maybeShowDebugChip(article, result);
-  }
-}
-async function maybeShowDebugChip(article, result) {
-  const stored = await chrome.storage.local.get("debug");
-  if (stored.debug !== true) return;
-  const chip = document.createElement("button");
-  chip.className = "feed-rubric-debug-chip";
-  chip.type = "button";
-  chip.title = "feed-rubric: click to unhide";
-  const top = Object.entries(result.scores).sort(([, a], [, b]) => b - a).slice(0, 2).map(([k, v]) => `${k}:${v.toFixed(2)}`).join(" ");
-  chip.textContent = `hidden \xB7 ${result.reasons.join(", ")} \xB7 ${top}`;
-  chip.addEventListener("click", (e) => {
-    e.stopPropagation();
-    applyHideState({ article, hide: false });
-    chip.remove();
+function mountPlaceholder(article, result, debug) {
+  removePlaceholder(article);
+  const row = createPlaceholder({
+    document: article.ownerDocument,
+    reasons: result.reasons,
+    debugDetail: debugDetail(result, debug)
   });
-  article.style.position ||= "relative";
-  article.appendChild(chip);
+  const undo = row.querySelector(`.${UNDO_CLASS}`);
+  undo?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    applyHideState({ article, hide: false });
+    removePlaceholder(article);
+  });
+  article.prepend(row);
+}
+async function applyResult(article, result) {
+  if (!result) return;
+  removePlaceholder(article);
+  applyHideState({ article, hide: result.hide });
+  if (!result.hide) return;
+  const stored = await chrome.storage.local.get("debug");
+  mountPlaceholder(article, result, stored.debug === true);
 }
 var observer = new IntersectionObserver(
   (entries) => {
@@ -235,6 +279,11 @@ var observer = new IntersectionObserver(
 function observeTweet(article) {
   if (observed.has(article)) return;
   observed.add(article);
+  if (isFixtureHost()) {
+    const postId = extractPostId(article);
+    if (postId) void requestClassification(article, postId);
+    return;
+  }
   observer.observe(article);
 }
 function scan(root) {

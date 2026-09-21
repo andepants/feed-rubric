@@ -134,6 +134,11 @@ async function saveForm(): Promise<void> {
   };
 
   await chrome.storage.local.set(settings);
+  try {
+    await chrome.runtime.sendMessage({ type: "clearCache" });
+  } catch {
+    // Fail open: fingerprint in the cache key still isolates new settings.
+  }
 
   const status = elById("save-status");
   if (!status) return;

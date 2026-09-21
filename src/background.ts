@@ -1,7 +1,10 @@
 import { enabledCategoryIds, loadSettings } from "./categories.js";
+import { cacheKey, settingsFingerprint } from "./cache-key.js";
+import { planClassify } from "./classify-plan.js";
 import { isRecord } from "./guard.js";
 import { classifyPost, type PostState } from "./jev.js";
 import { LAST_ERROR_KEY, type LastError } from "./last-error.js";
+import { isRateLimited, RATE_LIMIT, RATE_WINDOW_MS, pruneTimestamps } from "./rate-limit.js";
 import { evaluateScores, failOpen, parseScoreMap } from "./score.js";
 import type {
   ClassifyRequest,
@@ -11,28 +14,10 @@ import type {
 } from "./types.js";
 import { isClassifyRequest, isClearCacheRequest } from "./types.js";
 
-const RATE_LIMIT = 40;
-const RATE_WINDOW_MS = 60_000;
 const CACHE_PREFIX = "feed-rubric:cache:";
 
 const memoryCache = new Map<string, ClassifyResult>();
-const callTimestamps: number[] = [];
-
-function cacheKey(platform: string, postId: string): string {
-  return `${platform}:${postId}`;
-}
-
-function isRateLimited(): boolean {
-  const now = Date.now();
-  while (callTimestamps.length > 0 && callTimestamps[0]! < now - RATE_WINDOW_MS) {
-    callTimestamps.shift();
-  }
-  return callTimestamps.length >= RATE_LIMIT;
-}
-
-function recordCall(): void {
-  callTimestamps.push(Date.now());
-}
+let callTimestamps: number[] = [];
 
 async function recordError(message: string): Promise<void> {
   const lastError: LastError = { message, at: Date.now() };
@@ -58,8 +43,7 @@ async function writeSessionCache(key: string, result: ClassifyResult): Promise<v
   await chrome.storage.session.set({ [CACHE_PREFIX + key]: result });
 }
 
-async function getCached(platform: string, postId: string): Promise<ClassifyResult | null> {
-  const key = cacheKey(platform, postId);
+async function getCached(key: string): Promise<ClassifyResult | null> {
   const mem = memoryCache.get(key);
   if (mem) return mem;
   const session = await readSessionCache(key);
@@ -70,12 +54,7 @@ async function getCached(platform: string, postId: string): Promise<ClassifyResu
   return null;
 }
 
-async function setCached(
-  platform: string,
-  postId: string,
-  result: ClassifyResult,
-): Promise<void> {
-  const key = cacheKey(platform, postId);
+async function setCached(key: string, result: ClassifyResult): Promise<void> {
   memoryCache.set(key, result);
   await writeSessionCache(key, result);
 }
@@ -91,62 +70,101 @@ async function clearCache(): Promise<number> {
   return memory + keys.length;
 }
 
-async function classifyWithFixture(
-  fixtureScores: Record<string, number>,
-  threshold: number,
-  enabledIds: ReadonlySet<string>,
-): Promise<ClassifyResult> {
-  return evaluateScores({ scores: fixtureScores, enabledIds, threshold });
+function takeRateLimitSlot(now: number): boolean {
+  callTimestamps = pruneTimestamps({
+    timestamps: callTimestamps,
+    now,
+    windowMs: RATE_WINDOW_MS,
+  });
+  if (
+    isRateLimited({
+      timestamps: callTimestamps,
+      now,
+      limit: RATE_LIMIT,
+      windowMs: RATE_WINDOW_MS,
+    })
+  ) {
+    return false;
+  }
+  callTimestamps.push(now);
+  return true;
 }
 
 async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   const settings = await loadSettings();
   const enabled = settings.categories.filter((c) => c.enabled);
   const enabledIds = enabledCategoryIds(settings.categories);
+  const fingerprint = settingsFingerprint({
+    threshold: settings.threshold,
+    categories: settings.categories,
+  });
+  const key = cacheKey({
+    platform: req.platform,
+    postId: req.postId,
+    fingerprint,
+  });
 
-  const cached = await getCached(req.platform, req.postId);
-  if (cached) {
-    return { ...cached, cached: true };
-  }
+  const cached = await getCached(key);
+  const plan = planClassify({
+    cached,
+    fixtureScores: parseScoreMap(req.fixtureScores),
+    hasApiKey: settings.apiKey.length > 0,
+    rateLimited: isRateLimited({
+      timestamps: callTimestamps,
+      now: Date.now(),
+      limit: RATE_LIMIT,
+      windowMs: RATE_WINDOW_MS,
+    }),
+  });
 
-  const fixtureScores = parseScoreMap(req.fixtureScores);
-  if (fixtureScores) {
-    const result = await classifyWithFixture(
-      fixtureScores,
-      settings.threshold,
-      enabledIds,
-    );
-    await setCached(req.platform, req.postId, result);
-    return result;
-  }
-
-  if (!settings.apiKey) {
-    await recordError("no_api_key");
-    return failOpen("no_api_key");
-  }
-
-  if (isRateLimited()) {
-    await recordError("rate_limited");
-    return { ...failOpen("rate_limited"), rateLimited: true };
-  }
-
-  const state: PostState = { author: req.author, text: req.text };
-
-  try {
-    recordCall();
-    const response = await classifyPost(settings.apiKey, state, enabled);
-    const scores: Record<string, number> = {};
-    for (const [id, answer] of Object.entries(response.answers)) {
-      scores[id] = answer.noul;
+  switch (plan.kind) {
+    case "cache":
+      return { ...plan.result, cached: true };
+    case "fixture": {
+      const result = evaluateScores({
+        scores: plan.scores,
+        enabledIds,
+        threshold: settings.threshold,
+      });
+      await setCached(key, result);
+      return result;
     }
-    const result = evaluateScores({ scores, enabledIds, threshold: settings.threshold });
-    await setCached(req.platform, req.postId, result);
-    return result;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "unknown_error";
-    console.warn("[feed-rubric] classify failed:", err);
-    await recordError(message);
-    return failOpen(message);
+    case "fail_open": {
+      await recordError(plan.error);
+      return plan.error === "rate_limited"
+        ? { ...failOpen(plan.error), rateLimited: true }
+        : failOpen(plan.error);
+    }
+    case "api": {
+      const state: PostState = { author: req.author, text: req.text };
+      try {
+        if (!takeRateLimitSlot(Date.now())) {
+          await recordError("rate_limited");
+          return { ...failOpen("rate_limited"), rateLimited: true };
+        }
+        const response = await classifyPost(settings.apiKey, state, enabled);
+        const scores: Record<string, number> = {};
+        for (const [id, answer] of Object.entries(response.answers)) {
+          scores[id] = answer.noul;
+        }
+        const result = evaluateScores({
+          scores,
+          enabledIds,
+          threshold: settings.threshold,
+        });
+        await setCached(key, result);
+        return result;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown_error";
+        console.warn("[feed-rubric] classify failed:", err);
+        await recordError(message);
+        return failOpen(message);
+      }
+    }
+    default: {
+      const _exhaustive: never = plan;
+      return failOpen(`unhandled_plan:${String(_exhaustive)}`);
+    }
   }
 }
 

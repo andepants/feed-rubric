@@ -205,6 +205,10 @@ async function saveForm() {
     debug: debugEl.checked
   };
   await chrome.storage.local.set(settings);
+  try {
+    await chrome.runtime.sendMessage({ type: "clearCache" });
+  } catch {
+  }
   const status = elById("save-status");
   if (!status) return;
   status.textContent = "Saved.";

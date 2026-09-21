@@ -39,7 +39,7 @@ Three editable, disable-able categories ship by default (threshold **0.75**). Ea
 | `crypto_promo` | Shills a token, exchange, wallet, or get-rich scheme | Policy/market news, education without a buy pitch |
 | `unsolicited_politics` | Partisan argument or campaign ask | Neutral headline/report, or not electoral politics |
 
-Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). The last classify error and a cache-clear button live there too.
+Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). Hidden posts collapse to a slim **Undo** row. The last classify error and a cache-clear button live on Options.
 
 ## Load unpacked in Chrome
 
@@ -57,10 +57,14 @@ Change instructions, true/false criteria, threshold, or toggles on the **options
 
 Work the fixture first, then x.com. Selectors break; fail-open means a miss leaves posts visible.
 
+**CI = fixtures.** `npm test` runs vitest (no network) plus a Playwright smoke that loads the unpacked `extension/` against `fixtures/timeline.html`. It does not log into X. The Playwright smoke needs a display (headed Chromium or `xvfb-run`); Chrome headless shell cannot load MV3 extensions.
+
+**Manual smoke = your own X account.** Do not automate disposable X account creation.
+
 1. **Load unpacked** — `chrome://extensions` → Developer mode → Load unpacked → `extension/` folder.
-2. **Options + API key** — right-click the extension icon → Options (or popup → Open settings). Paste your TypeSafe key. It stays in `chrome.storage.local` on this machine and is used only by the service worker.
-3. **Fixture first (no X, no TypeSafe network required for the hide loop)** — `npm test` applies dry-run scores from `fixtures/timeline.html` and asserts tweets 1–3 hide. Then `npm run fixture` and open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html) with the extension loaded. Tweets 1–3 hide at the default threshold; the rest stay visible. Enable **Debug** to see a faint chip on hidden posts (click to unhide).
-4. **Then x.com** — open a timeline. If nothing hides, check Options for the last error (missing key, rate limit, API failure) and that categories are enabled. x.com selectors live in `src/sites/x.ts`.
+2. **Options + API key** — right-click the extension icon → Options (or popup → Open settings). Paste your TypeSafe key. It stays in `chrome.storage.local` on this machine and is used only by the service worker. Saving wipes the score cache. The cache key also includes a hash of threshold + enabled category instructions, so old scores cannot apply to a new rubric.
+3. **Fixture first (no X)** — `npm test` (needs Chromium once: `npx playwright install chromium`). Then `npm run fixture` and open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html) with the extension loaded. Tweets 1–3 collapse to a slim **Undo** row at the default threshold; the rest stay visible.
+4. **Then x.com** — open a timeline on your own account. If nothing hides, check Options for the last error (missing key, rate limit, API failure) and that categories are enabled. x.com selectors live in `src/sites/x.ts` as a fallback chain. Live classify needs `https://api.typesafe.ai/*` host permission (shipped in the manifest).
 5. **Privacy reminder** — only post text, author handle, and your category instructions go to `https://api.typesafe.ai/v1/systemone`. No cookies, DMs, page HTML, or telemetry. Use your own key (BYOK). There is no backend.
 
 ## Fixture timeline (no API key required)
@@ -68,11 +72,11 @@ Work the fixture first, then x.com. Selectors break; fail-open means a miss leav
 Three fixture tweets include hardcoded `data-feed-rubric-scores` so you can demo the hide loop without a key:
 
 ```bash
-npm test          # jsdom smoke: hide loop, no network
+npm test          # vitest + Playwright fixture smoke (no X)
 npm run fixture   # serve fixtures/ on :8080
 ```
 
-Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html). Tweets 1–3 should hide at the default threshold; the rest stay visible.
+Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html). Tweets 1–3 collapse to an Undo row at the default threshold; the rest stay visible.
 
 ## Architecture
 
@@ -81,12 +85,12 @@ content script (x.com + fixtures)
   → extract text + post id
   → chrome.runtime.sendMessage
 service worker
-  → cache (memory + chrome.storage.session)
+  → cache (memory + chrome.storage.session, keyed by post + rubric hash)
   → rate limit (~40 calls/min, fail open over cap)
   → POST Jev systemone (one call, one noul per enabled category)
   → { hide, reasons, scores }
 content script
-  → [data-feed-rubric-hide] or leave visible
+  → slim placeholder + Undo, or leave visible
 ```
 
 x.com selectors live in `src/sites/x.ts` and are expected to break.
@@ -95,7 +99,8 @@ x.com selectors live in `src/sites/x.ts` and are expected to break.
 
 ```bash
 npm install
-npm test           # vitest + jsdom hide-loop smoke (no network)
+npx playwright install chromium
+npm test           # vitest unit + Playwright unpacked-extension smoke
 npm run build      # compile TS → extension/
 npm run watch      # rebuild on change
 npm run fixture    # serve fixtures/ on :8080
@@ -105,11 +110,12 @@ Source layout:
 
 - `src/jev.ts` — thin fetch wrapper for System One
 - `src/categories.ts` — defaults, noul criteria, settings helpers
-- `src/sites/x.ts` — x.com DOM adapter (documented selectors, fail-open)
-- `src/score.ts` / `src/hide.ts` — pure score evaluation and hide attribute
+- `src/sites/x.ts` — x.com DOM adapter (selector fallback chain, fail-open)
+- `src/score.ts` / `src/hide.ts` / `src/classify-plan.ts` — pure score, hide, and fail-open plan
 - `extension/` — loadable unpacked extension (built artifacts)
 - `fixtures/timeline.html` — 8 fake tweets for local testing
-- `test/hide-loop.test.ts` — fixture hide-loop smoke
+- `test/` — vitest unit/hide-loop
+- `e2e/` — Playwright smoke with unpacked extension (CI, no X login)
 
 ## License
 

@@ -9,7 +9,7 @@ import {
   enabledCategoryIds,
   normalizeCategories,
 } from "../src/categories.js";
-import { applyHideState, isHidden } from "../src/hide.js";
+import { applyHideState, isHidden, createPlaceholder, UNDO_CLASS } from "../src/hide.js";
 import { buildQuestions } from "../src/jev.js";
 import { evaluateScores, parseFixtureScores } from "../src/score.js";
 import {
@@ -103,6 +103,21 @@ describe("x.com adapter fail-open", () => {
     expect(extractAuthor(null)).toBe("@unknown");
   });
 
+  it("falls back through the selector chain when testids are missing", () => {
+    const document = new JSDOM(`
+      <article role="article">
+        <a href="/fallback_user">Fallback</a>
+        <a href="/fallback_user/status/4242">permalink</a>
+        <div lang="en">body via lang fallback</div>
+      </article>
+    `).window.document;
+    const article = findTweetArticles(document)[0];
+    expect(article).toBeDefined();
+    if (!article) return;
+    expect(extractPostId(article)).toBe("4242");
+    expect(extractText(article)).toMatch(/lang fallback/i);
+  });
+
   it("parses a status id from a permalink href", () => {
     expect(parseStatusId("/outrage_bot/status/1000000000000000001")).toBe(
       "1000000000000000001",
@@ -151,5 +166,26 @@ describe("default noul categories", () => {
     expect(questions.rage_bait?.criteria.true).toMatch(/inflame/i);
     expect(questions.crypto_promo?.criteria.false).toMatch(/not a promo/i);
     expect(questions.unsolicited_politics?.criteria.false).toMatch(/neutral/i);
+  });
+});
+
+describe("placeholder row", () => {
+  it("builds a slim Undo control without removing the article", () => {
+    const document = new JSDOM(
+      `<article data-testid="tweet"><div data-testid="tweetText">keep</div></article>`,
+    ).window.document;
+    const article = findTweetArticles(document)[0];
+    expect(article).toBeDefined();
+    if (!article) return;
+    applyHideState({ article, hide: true });
+    article.prepend(
+      createPlaceholder({
+        document,
+        reasons: ["rage_bait"],
+      }),
+    );
+    expect(isHidden(article)).toBe(true);
+    expect(article.querySelector(`.${UNDO_CLASS}`)?.textContent).toBe("Undo");
+    expect(article.textContent).toMatch(/Hidden · rage_bait/);
   });
 });
