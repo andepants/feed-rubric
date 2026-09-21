@@ -64,6 +64,9 @@ describe("origin allowlists", () => {
     expect(
       isExtensionPageSender({ url: "https://x.com/home" }, id),
     ).toBe(false);
+    expect(
+      isExtensionPageSender({ url: `chrome-extension://${id}/options.html` }, id),
+    ).toBe(false);
   });
 
   it("derives fixture vs live from sender URL, not the message body", () => {
@@ -79,6 +82,9 @@ describe("origin allowlists", () => {
     ).toBe(true);
     expect(
       isTrustedClassifySender({ id, url: "https://evil.example/" }, id),
+    ).toBe(false);
+    expect(
+      isTrustedClassifySender({ url: "https://x.com/home" }, id),
     ).toBe(false);
   });
 });

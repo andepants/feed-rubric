@@ -3,6 +3,7 @@ import type { ClassifyResult } from "./types.js";
 export type ClassifyPlan =
   | { kind: "cache"; result: ClassifyResult }
   | { kind: "fixture"; scores: Record<string, number> }
+  | { kind: "fail_open"; error: "disabled" }
   | { kind: "fail_open"; error: "no_api_key" }
   | { kind: "fail_open"; error: "rate_limited" }
   | { kind: "fail_open"; error: "fixture_only" }
@@ -14,12 +15,16 @@ export function planClassify(args: {
   fixtureScores: Record<string, number> | undefined;
   allowFixture: boolean;
   allowApi: boolean;
+  enabled: boolean;
   hasApiKey: boolean;
   rateLimited: boolean;
   validPost: boolean;
 }): ClassifyPlan {
   if (!args.validPost) {
     return { kind: "fail_open", error: "invalid_post" };
+  }
+  if (!args.enabled) {
+    return { kind: "fail_open", error: "disabled" };
   }
   if (args.cached) {
     return { kind: "cache", result: args.cached };

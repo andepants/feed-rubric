@@ -19,7 +19,7 @@ export function isTrustedClassifySender(
   sender: MessageSenderLike,
   extensionId: string,
 ): boolean {
-  if (sender.id && sender.id !== extensionId) return false;
+  if (!sender.id || sender.id !== extensionId) return false;
   return isAllowedClassifyOrigin(classifySenderOrigin(sender));
 }
 
@@ -31,6 +31,6 @@ export function isExtensionPageSender(
   sender: MessageSenderLike,
   extensionId: string,
 ): boolean {
-  if (sender.id && sender.id !== extensionId) return false;
+  if (!sender.id || sender.id !== extensionId) return false;
   return isExtensionPageUrl(sender.url, extensionId);
 }

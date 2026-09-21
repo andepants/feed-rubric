@@ -71,7 +71,10 @@ export function parseSystemOneResponse(value: unknown): SystemOneResponse {
     if (parsed) answers[id] = parsed;
   }
 
-  const model = typeof value.model === "string" ? value.model : JEV_MODEL;
+  const model = typeof value.model === "string" ? value.model : "";
+  if (model !== JEV_MODEL) {
+    throw new Error("unexpected_jev_model");
+  }
   return { model, answers };
 }
 

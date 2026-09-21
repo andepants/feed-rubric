@@ -131,6 +131,15 @@
     <p class="subtitle">Your rubric is the product — category instructions + threshold.</p>
 
     <fieldset>
+      <legend>Filtering</legend>
+      <label>
+        <input id="enabled" type="checkbox" checked />
+        Enable feed filtering on X
+      </label>
+      <p class="hint">When off, posts stay visible and no classify requests are sent.</p>
+    </fieldset>
+
+    <fieldset>
       <legend>TypeSafe API</legend>
       <label for="apiKey">API key (BYOK)</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="ts_…" />

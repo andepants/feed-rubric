@@ -215,15 +215,18 @@ async function loadForm() {
   try {
     const stored = await chrome.storage.local.get([
       "apiKey",
+      "enabled",
       "threshold",
       "categories",
       "debug",
       LAST_ERROR_KEY
     ]);
     const apiKey = inputEl("apiKey");
+    const enabled = inputEl("enabled");
     const threshold = inputEl("threshold");
     const debug = inputEl("debug");
     if (apiKey) apiKey.value = typeof stored.apiKey === "string" ? stored.apiKey : "";
+    if (enabled) enabled.checked = stored.enabled !== false;
     if (threshold) {
       threshold.value = String(
         typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD
@@ -243,15 +246,19 @@ async function loadForm() {
 }
 async function saveForm() {
   const apiKeyEl = inputEl("apiKey");
+  const enabledEl = inputEl("enabled");
   const thresholdEl = inputEl("threshold");
   const debugEl = inputEl("debug");
-  if (!apiKeyEl || !thresholdEl || !debugEl) {
+  if (!apiKeyEl || !enabledEl || !thresholdEl || !debugEl) {
     setStatus("save-status", "Settings form is missing a field.", true);
     return;
   }
+  const apiKey = apiKeyEl.value.trim();
   const threshold = clampThreshold(parseFloat(thresholdEl.value));
   const settings = {
-    apiKey: apiKeyEl.value.trim(),
+    apiKey,
+    hasApiKey: apiKey.length > 0,
+    enabled: enabledEl.checked,
     threshold,
     categories: readCategories(),
     debug: debugEl.checked

@@ -10,6 +10,7 @@ const base = {
   fixtureScores: undefined as Record<string, number> | undefined,
   allowFixture: false,
   allowApi: true,
+  enabled: true,
   hasApiKey: true,
   rateLimited: false,
   validPost: true,
@@ -84,6 +85,14 @@ describe("planClassify", () => {
       validPost: false,
     });
     expect(plan).toEqual({ kind: "fail_open", error: "invalid_post" });
+  });
+
+  it("fail-opens when filtering is paused", () => {
+    const plan = planClassify({
+      ...base,
+      enabled: false,
+    });
+    expect(plan).toEqual({ kind: "fail_open", error: "disabled" });
   });
 
   it("calls the API when key is present and under the cap", () => {

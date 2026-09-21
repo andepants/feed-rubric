@@ -1,8 +1,10 @@
 {
   "manifest_version": 3,
   "name": "feed-rubric",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "User-defined rubric categories. Jev noul scores each feed post; hide matches over your threshold.",
+  "homepage_url": "https://github.com/andepants/feed-rubric",
+  "minimum_chrome_version": "120",
   "permissions": ["storage"],
   "host_permissions": ["https://api.typesafe.ai/*"],
   "content_security_policy": {

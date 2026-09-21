@@ -209,8 +209,13 @@ function isFixtureHost() {
 var VISIBILITY_THRESHOLD = 0.55;
 var REASONS_ATTR = "data-feed-rubric-reasons";
 var DEBUG_ATTR = "data-feed-rubric-debug";
+var RATE_LIMIT_RETRY_MS = 15e3;
+var ERROR_RETRY_MS = 5e3;
 var pending = /* @__PURE__ */ new Set();
+var finalized = /* @__PURE__ */ new Set();
 var observed = /* @__PURE__ */ new WeakSet();
+var retryTimers = /* @__PURE__ */ new Map();
+var filteringEnabled = true;
 function platformForHost() {
   return isFixtureHost() ? "fixture" : PLATFORM;
 }
@@ -224,7 +229,9 @@ function parseClassifyResult(value) {
     hide: result.hide,
     reasons,
     scores: parseScoreMap(result.scores) ?? {},
-    debug: result.debug === true
+    debug: result.debug === true,
+    rateLimited: result.rateLimited === true,
+    error: typeof result.error === "string" ? result.error : void 0
   };
 }
 function debugDetail(result, debug) {
@@ -242,10 +249,42 @@ function parseStoredReasons(article) {
     return [];
   }
 }
+function shouldRetry(result, messageFailed) {
+  if (messageFailed) return true;
+  if (!result) return true;
+  if (result.rateLimited) return true;
+  if (result.error) return true;
+  return false;
+}
+function retryDelayMs(result) {
+  if (result?.rateLimited) return RATE_LIMIT_RETRY_MS;
+  return ERROR_RETRY_MS;
+}
+function clearRetryTimer(postId) {
+  const timer = retryTimers.get(postId);
+  if (timer) {
+    clearTimeout(timer);
+    retryTimers.delete(postId);
+  }
+}
+function scheduleRetry(article, postId, delayMs) {
+  clearRetryTimer(postId);
+  const timer = setTimeout(() => {
+    retryTimers.delete(postId);
+    if (!filteringEnabled) return;
+    observer.observe(article);
+  }, delayMs);
+  retryTimers.set(postId, timer);
+}
 async function requestClassification(article, postId) {
-  if (pending.has(postId)) return;
+  if (!filteringEnabled) return true;
+  if (pending.has(postId)) return false;
+  if (finalized.has(postId)) return true;
   const text = extractText(article);
-  if (!text) return;
+  if (!text) {
+    finalized.add(postId);
+    return true;
+  }
   pending.add(postId);
   const message = {
     type: "classify",
@@ -255,14 +294,24 @@ async function requestClassification(article, postId) {
     text,
     fixtureScores: isFixtureHost() ? parseFixtureScores(article.dataset.feedRubricScores) : void 0
   };
+  let messageFailed = false;
+  let result;
   try {
     const response = await chrome.runtime.sendMessage(message);
-    await applyResult(article, parseClassifyResult(response));
+    result = parseClassifyResult(response);
+    await applyResult(article, result);
   } catch (err) {
+    messageFailed = true;
     console.warn("[feed-rubric] message failed:", err);
   } finally {
     pending.delete(postId);
   }
+  if (shouldRetry(result, messageFailed)) {
+    scheduleRetry(article, postId, retryDelayMs(result));
+    return false;
+  }
+  finalized.add(postId);
+  return true;
 }
 function bindUndo(article, row) {
   const undo = row.querySelector(`.${UNDO_CLASS}`);
@@ -319,16 +368,57 @@ async function applyResult(article, result) {
   else article.removeAttribute(DEBUG_ATTR);
   mountPlaceholder(article, result, debug);
 }
+function restoreAllHidden() {
+  for (const article of findTweetArticles(document)) {
+    if (!isHidden(article)) continue;
+    article.removeAttribute(REASONS_ATTR);
+    article.removeAttribute(DEBUG_ATTR);
+    applyHideState({ article, hide: false });
+    removePlaceholder(article);
+  }
+}
+function resetClassificationState() {
+  finalized.clear();
+  for (const timer of retryTimers.values()) {
+    clearTimeout(timer);
+  }
+  retryTimers.clear();
+}
+function rescanVisiblePosts() {
+  resetClassificationState();
+  for (const article of findTweetArticles(document)) {
+    const postId = extractPostId(article);
+    if (!postId) continue;
+    clearRetryTimer(postId);
+    if (isFixtureHost()) {
+      void requestClassification(article, postId);
+      continue;
+    }
+    observer.observe(article);
+  }
+}
 var observer = new IntersectionObserver(
   (entries) => {
+    if (!filteringEnabled) return;
     for (const entry of entries) {
       if (entry.intersectionRatio < VISIBILITY_THRESHOLD) continue;
       const target = entry.target;
       if (!isHtmlElement(target)) continue;
       const postId = extractPostId(target);
-      if (!postId) continue;
+      if (!postId) {
+        observer.unobserve(target);
+        continue;
+      }
+      if (finalized.has(postId) || pending.has(postId)) {
+        observer.unobserve(target);
+        continue;
+      }
       observer.unobserve(target);
-      void requestClassification(target, postId);
+      void requestClassification(target, postId).then((done) => {
+        if (!done && filteringEnabled) {
+          observer.observe(target);
+        }
+      });
     }
   },
   { threshold: [0, VISIBILITY_THRESHOLD, 1] }
@@ -339,6 +429,7 @@ function observeTweet(article) {
     return;
   }
   observed.add(article);
+  if (!filteringEnabled) return;
   if (isFixtureHost()) {
     const postId = extractPostId(article);
     if (postId) void requestClassification(article, postId);
@@ -370,14 +461,41 @@ var mutationObserver = new MutationObserver((mutations) => {
     }
   }
 });
+async function loadFilteringEnabled() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "getState" });
+    if (isRecord(response) && response.type === "state" && typeof response.enabled === "boolean") {
+      filteringEnabled = response.enabled;
+      return;
+    }
+  } catch {
+  }
+}
+function onSettingsChanged(enabled) {
+  filteringEnabled = enabled;
+  if (!enabled) {
+    restoreAllHidden();
+    resetClassificationState();
+    return;
+  }
+  rescanVisiblePosts();
+}
 function start() {
   scan(document);
   const body = document.body;
   if (!body) return;
   mutationObserver.observe(body, { childList: true, subtree: true });
 }
-if (document.body) {
-  start();
-} else {
-  document.addEventListener("DOMContentLoaded", start, { once: true });
-}
+void loadFilteringEnabled().then(() => {
+  if (document.body) {
+    start();
+  } else {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  }
+});
+chrome.runtime.onMessage.addListener((message) => {
+  if (!isRecord(message)) return;
+  if (message.type === "settingsChanged" && typeof message.enabled === "boolean") {
+    onSettingsChanged(message.enabled);
+  }
+});

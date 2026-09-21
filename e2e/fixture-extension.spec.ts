@@ -7,6 +7,18 @@ import { fileURLToPath } from "node:url";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionPath = join(repoRoot, "extension");
 
+async function captureArtifact(
+  page: Awaited<ReturnType<BrowserContext["newPage"]>>,
+  path: string,
+  options?: { fullPage?: boolean },
+): Promise<void> {
+  try {
+    await page.screenshot({ path, ...options });
+  } catch {
+    // Artifact only — popup/extension pages can fail capture in headless CI.
+  }
+}
+
 export const test = base.extend<{
   context: BrowserContext;
 }>({
@@ -40,8 +52,7 @@ test("unpacked extension hides fixture tweets 1–3 with Undo, no X login", asyn
 
   const first = page.locator('article[data-testid="tweet"]').first();
   await expect(first.locator(".feed-rubric-undo")).toBeVisible();
-  await page.screenshot({
-    path: testInfo.outputPath("fixture_undo_placeholders.png"),
+  await captureArtifact(page, testInfo.outputPath("fixture_undo_placeholders.png"), {
     fullPage: true,
   });
   await first.locator(".feed-rubric-undo").click();
@@ -76,8 +87,7 @@ test("options page shows noul criteria, last error, and cache clear", async ({
   await expect(page.locator("#save-status")).toHaveText("Saved.");
   await page.locator("#reset-categories").click();
   await expect(page.locator("#save-status")).toContainText("click Save");
-  await page.screenshot({
-    path: testInfo.outputPath("options_runtime.png"),
+  await captureArtifact(page, testInfo.outputPath("options_runtime.png"), {
     fullPage: true,
   });
 });
@@ -95,8 +105,6 @@ test("popup shows fail-open empty state without an API key", async ({
     "No API key — posts stay visible (fail open).",
   );
   await expect(page.locator("#open-options")).toBeVisible();
-  await page.screenshot({
-    path: testInfo.outputPath("popup_empty_state.png"),
-  });
+  await captureArtifact(page, testInfo.outputPath("popup_empty_state.png"));
 });
 

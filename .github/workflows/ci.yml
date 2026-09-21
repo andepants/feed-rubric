@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx playwright install chromium
+
+      - run: xvfb-run npm test
+
+      - name: Production build has no sourcemaps or loopback matches
+        run: |
+          npm run build
+          test ! -f extension/background.js.map
+          ! grep -q '127.0.0.1' extension/manifest.json
