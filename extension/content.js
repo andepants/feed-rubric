@@ -72,10 +72,10 @@ function parseFixtureScores(raw) {
 }
 
 // src/origins.ts
-var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:18080"
-]);
+var LIVE_ORIGINS = ["https://x.com", "https://twitter.com"];
+var FIXTURE_ORIGIN = "http://127.0.0.1:18080";
+var CLASSIFY_ORIGINS = /* @__PURE__ */ new Set([...LIVE_ORIGINS, FIXTURE_ORIGIN]);
+var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([FIXTURE_ORIGIN]);
 function isFixtureOrigin(origin) {
   return origin !== null && FIXTURE_ORIGINS.has(origin);
 }
@@ -381,4 +381,3 @@ if (document.body) {
 } else {
   document.addEventListener("DOMContentLoaded", start, { once: true });
 }
-//# sourceMappingURL=content.js.map

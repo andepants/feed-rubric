@@ -11,7 +11,7 @@ Chrome MV3 extension: user-defined categories, Jev noul per post, hide if over t
 - x.com selectors live in one file and are allowed to break.
 - No backend. No ads. No extra sites until the X/fixture loop is boring.
 - Install TypeSafe skill: `npx skills add typesafe-ai/skills --skill typesafe-ai`
-- Prove the hide loop locally: `npm test` (vitest + Playwright fixture smoke; no X login).
+- Prove the hide loop locally: `npm test` (vitest + Playwright fixture smoke; no X login). `npm test` builds with `--fixture` so the unpacked extension injects on `127.0.0.1:18080`. Production `npm run build` does not.
 
 ## Product rule
 

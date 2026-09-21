@@ -1,5 +1,5 @@
 /* Collapse a hidden tweet to a slim row; never display:none the article
-   so Undo stays clickable. */
+   so Undo stays clickable. Contrast is tuned for x.com's dark timeline. */
 [data-feed-rubric-hide] > *:not(.feed-rubric-placeholder) {
   display: none !important;
 }
@@ -12,9 +12,10 @@
   box-sizing: border-box;
   width: 100%;
   padding: 8px 12px;
+  border: 1px solid #8b98a5;
   border-radius: 8px;
-  background: rgba(127, 127, 127, 0.12);
-  color: #8b98a5;
+  background: #1e2732;
+  color: #e7e9ea;
   font: 12px/1.35 system-ui, sans-serif;
   pointer-events: auto;
 }
@@ -22,15 +23,34 @@
 .feed-rubric-undo {
   flex-shrink: 0;
   padding: 4px 10px;
-  border: 1px solid #8b98a5;
+  border: 1px solid #e7e9ea;
   border-radius: 999px;
-  background: transparent;
-  color: inherit;
+  background: #e7e9ea;
+  color: #0f1419;
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
   pointer-events: auto;
 }
 
 .feed-rubric-undo:hover {
-  background: rgba(127, 127, 127, 0.18);
+  background: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+  .feed-rubric-placeholder {
+    background: #e7e9ea;
+    color: #0f1419;
+    border-color: #536471;
+  }
+
+  .feed-rubric-undo {
+    background: #0f1419;
+    border-color: #0f1419;
+    color: #fff;
+  }
+
+  .feed-rubric-undo:hover {
+    background: #273340;
+  }
 }
