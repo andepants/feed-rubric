@@ -1,0 +1,16 @@
+{
+  "name": "feed-rubric",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome MV3 extension: user-defined rubric categories, Jev noul scores each feed post",
+  "license": "MIT",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "fixture": "python3 -m http.server 8080 --directory fixtures"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

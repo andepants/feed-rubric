@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>feed-rubric settings</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+      body {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 24px 20px 48px;
+        font: 14px/1.5 system-ui, sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 22px;
+      }
+      .subtitle {
+        margin: 0 0 24px;
+        color: #666;
+      }
+      fieldset {
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        margin: 0 0 20px;
+        padding: 16px;
+      }
+      legend {
+        padding: 0 6px;
+        font-weight: 600;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+      input[type="text"],
+      input[type="password"],
+      input[type="number"],
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font: inherit;
+      }
+      .hint {
+        margin: 6px 0 0;
+        color: #666;
+        font-size: 12px;
+      }
+      .category-row {
+        margin-bottom: 16px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #ddd;
+      }
+      .category-row:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
+      }
+      .category-header label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+      }
+      .cat-id {
+        font-weight: 400;
+        color: #888;
+        font-size: 12px;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+      button {
+        padding: 8px 14px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #f5f5f5;
+        cursor: pointer;
+        font: inherit;
+      }
+      button.primary {
+        background: #111;
+        color: #fff;
+        border-color: #111;
+      }
+      #save-status {
+        color: #080;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>feed-rubric</h1>
+    <p class="subtitle">Your rubric is the product — category instructions + threshold.</p>
+
+    <fieldset>
+      <legend>TypeSafe API</legend>
+      <label for="apiKey">API key (BYOK)</label>
+      <input id="apiKey" type="password" autocomplete="off" placeholder="ts_…" />
+      <p class="hint">Stored in chrome.storage.local. Used only by the service worker — never sent to content scripts.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Threshold</legend>
+      <label for="threshold">Hide when any enabled category noul ≥</label>
+      <input id="threshold" type="number" min="0" max="1" step="0.05" value="0.75" />
+      <p class="hint">Ambiguous scores near 0.5 never hide (fail open).</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Categories</legend>
+      <div id="categories"></div>
+      <p class="hint">Each enabled category becomes one noul question in a single Jev call per post.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Debug</legend>
+      <label>
+        <input id="debug" type="checkbox" />
+        Show faint chip on hidden posts (click to unhide)
+      </label>
+    </fieldset>
+
+    <div class="actions">
+      <button id="save" class="primary" type="button">Save</button>
+      <button id="reset-categories" type="button">Reset categories</button>
+      <span id="save-status"></span>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>
