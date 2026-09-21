@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>feed-rubric fixture timeline</title>
+    <style>
+      body {
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 24px 16px;
+        font: 15px/1.4 system-ui, sans-serif;
+        background: #15202b;
+        color: #e7e9ea;
+      }
+      h1 {
+        font-size: 18px;
+        margin-bottom: 8px;
+      }
+      .note {
+        font-size: 13px;
+        color: #8899a6;
+        margin-bottom: 24px;
+      }
+      article[data-testid="tweet"] {
+        border: 1px solid #38444d;
+        border-radius: 12px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+        position: relative;
+      }
+      [data-testid="User-Name"] {
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+      [data-testid="tweetText"] {
+        white-space: pre-wrap;
+      }
+      .fixture-tag {
+        display: inline-block;
+        margin-top: 8px;
+        font-size: 11px;
+        color: #8899a6;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>feed-rubric fixture timeline</h1>
+    <p class="note">
+      Serve with <code>npm run fixture</code> then open
+      <code>http://127.0.0.1:8080/timeline.html</code>. Tweets with
+      <code>data-feed-rubric-scores</code> dry-run without an API key.
+    </p>
+
+    <!-- 1: should hide (rage_bait high) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.92,"crypto_promo":0.08,"unsolicited_politics":0.15}'
+    >
+      <div data-testid="User-Name">
+        <a href="/outrage_bot">Outrage Bot</a> @outrage_bot
+      </div>
+      <a href="/outrage_bot/status/1000000000000000001"><time></time></a>
+      <div data-testid="tweetText">
+        Can you BELIEVE what they just did?? Quote-tweet this if you're as
+        furious as I am. They want you to stay silent.
+      </div>
+      <span class="fixture-tag">expect: hidden (rage_bait)</span>
+    </article>
+
+    <!-- 2: should hide (crypto_promo high) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.12,"crypto_promo":0.88,"unsolicited_politics":0.05}'
+    >
+      <div data-testid="User-Name">
+        <a href="/moon_shill">Moon Shill</a> @moon_shill
+      </div>
+      <a href="/moon_shill/status/1000000000000000002"><time></time></a>
+      <div data-testid="tweetText">
+        $PEPE is the next 100x gem 🚀 Get in my Telegram before the pump.
+        Not financial advice but you're ngmi if you skip this wallet.
+      </div>
+      <span class="fixture-tag">expect: hidden (crypto_promo)</span>
+    </article>
+
+    <!-- 3: should hide (unsolicited_politics high) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.10,"crypto_promo":0.04,"unsolicited_politics":0.91}'
+    >
+      <div data-testid="User-Name">
+        <a href="/party_hack">Party Hack</a> @party_hack
+      </div>
+      <a href="/party_hack/status/1000000000000000003"><time></time></a>
+      <div data-testid="tweetText">
+        The other side is destroying everything you love. Donate $5 now and
+        share this thread — we're running out of time to save the country.
+      </div>
+      <span class="fixture-tag">expect: hidden (unsolicited_politics)</span>
+    </article>
+
+    <!-- 4: should stay visible (all low) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.18,"crypto_promo":0.09,"unsolicited_politics":0.11}'
+    >
+      <div data-testid="User-Name">
+        <a href="/calm_dev">Calm Dev</a> @calm_dev
+      </div>
+      <a href="/calm_dev/status/1000000000000000004"><time></time></a>
+      <div data-testid="tweetText">
+        Shipped a small refactor today: extracted the timeline parser into its
+        own module. Tests pass, bundle size unchanged. Quiet Friday.
+      </div>
+      <span class="fixture-tag">expect: visible</span>
+    </article>
+
+    <!-- 5: should stay visible (ambiguous scores near 0.5 — fail open) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.52,"crypto_promo":0.48,"unsolicited_politics":0.51}'
+    >
+      <div data-testid="User-Name">
+        <a href="/maybe_spicy">Maybe Spicy</a> @maybe_spicy
+      </div>
+      <a href="/maybe_spicy/status/1000000000000000005"><time></time></a>
+      <div data-testid="tweetText">
+        Hot take: maybe we should talk about incentives more and personalities
+        less. Or maybe not. Hard to say from one tweet.
+      </div>
+      <span class="fixture-tag">expect: visible (ambiguous)</span>
+    </article>
+
+    <!-- 6: should stay visible (sarcasm but real argument — rage_bait low) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.22,"crypto_promo":0.03,"unsolicited_politics":0.30}'
+    >
+      <div data-testid="User-Name">
+        <a href="/sarcastic_sage">Sarcastic Sage</a> @sarcastic_sage
+      </div>
+      <a href="/sarcastic_sage/status/1000000000000000006"><time></time></a>
+      <div data-testid="tweetText">
+        Oh sure, because the *real* problem with urban planning is bike lanes,
+        not decades of single-use zoning. Here's a thread on mixed-use reform
+        with citations.
+      </div>
+      <span class="fixture-tag">expect: visible (real argument)</span>
+    </article>
+
+    <!-- 7: should stay visible (crypto news, not promo) -->
+    <article
+      data-testid="tweet"
+      data-feed-rubric-scores='{"rage_bait":0.08,"crypto_promo":0.19,"unsolicited_politics":0.25}'
+    >
+      <div data-testid="User-Name">
+        <a href="/news_desk">News Desk</a> @news_desk
+      </div>
+      <a href="/news_desk/status/1000000000000000007"><time></time></a>
+      <div data-testid="tweetText">
+        SEC proposes updated custody rules for crypto exchanges; comment period
+        opens Monday. Neutral summary in the link.
+      </div>
+      <span class="fixture-tag">expect: visible (policy news)</span>
+    </article>
+
+    <!-- 8: no fixture scores — fail open without API key -->
+    <article data-testid="tweet">
+      <div data-testid="User-Name">
+        <a href="/no_scores">No Scores</a> @no_scores
+      </div>
+      <a href="/no_scores/status/1000000000000000008"><time></time></a>
+      <div data-testid="tweetText">
+        This tweet has no dry-run scores. Without an API key, feed-rubric
+        fail-opens and leaves it visible.
+      </div>
+      <span class="fixture-tag">expect: visible (no key, no scores)</span>
+    </article>
+  </body>
+</html>

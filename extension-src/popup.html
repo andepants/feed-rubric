@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>feed-rubric</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 12px 14px;
+        width: 260px;
+        font: 13px/1.4 system-ui, sans-serif;
+        color: #111;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 15px;
+      }
+      #status {
+        margin: 0 0 12px;
+        color: #444;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        background: #f5f5f5;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #eee;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>feed-rubric</h1>
+    <p id="status">Loading…</p>
+    <button id="open-options" type="button">Open settings</button>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
