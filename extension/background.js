@@ -232,16 +232,10 @@ function isConfidentYes(noul) {
 var LAST_ERROR_KEY = "lastError";
 
 // src/origins.ts
-var CLASSIFY_ORIGINS = /* @__PURE__ */ new Set([
-  "https://x.com",
-  "https://twitter.com",
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:18080"
-]);
-var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:18080"
-]);
+var LIVE_ORIGINS = ["https://x.com", "https://twitter.com"];
+var FIXTURE_ORIGIN = "http://127.0.0.1:18080";
+var CLASSIFY_ORIGINS = /* @__PURE__ */ new Set([...LIVE_ORIGINS, FIXTURE_ORIGIN]);
+var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([FIXTURE_ORIGIN]);
 function originOf(url) {
   if (!url) return null;
   try {
@@ -539,4 +533,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
   return true;
 });
-//# sourceMappingURL=background.js.map

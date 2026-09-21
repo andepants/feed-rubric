@@ -60,4 +60,3 @@ async function init() {
   });
 }
 void init();
-//# sourceMappingURL=popup.js.map

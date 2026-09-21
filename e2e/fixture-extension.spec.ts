@@ -47,6 +47,15 @@ test("unpacked extension hides fixture tweets 1–3 with Undo, no X login", asyn
   await first.locator(".feed-rubric-undo").click();
   await expect(first).not.toHaveAttribute("data-feed-rubric-hide", "true");
   await expect(page.locator('[data-feed-rubric-hide="true"]')).toHaveCount(2);
+
+  const [worker] = context.serviceWorkers();
+  expect(worker).toBeTruthy();
+  if (!worker) return;
+  const extensionId = new URL(worker.url()).host;
+  const options = await context.newPage();
+  await options.goto(`chrome-extension://${extensionId}/options.html`);
+  await options.locator("#clear-cache").click();
+  await expect(options.locator("#cache-status")).toContainText(/Cleared \d+ cached score/);
 });
 
 test("options page shows noul criteria, last error, and cache clear", async ({
