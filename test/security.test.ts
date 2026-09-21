@@ -118,7 +118,8 @@ describe("placeholder XSS", () => {
 
     expect(row.querySelector("img")).toBeNull();
     expect(row.querySelector("script")).toBeNull();
-    expect(row.innerHTML).not.toMatch(/onerror/i);
+    expect(row.innerHTML).not.toMatch(/<img/i);
+    expect(row.innerHTML).not.toMatch(/<script/i);
     expect(row.textContent).toContain(payload);
     expect(article.querySelector(`.${PLACEHOLDER_CLASS}`)?.textContent).toContain(
       payload,
