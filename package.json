@@ -7,11 +7,12 @@
   "license": "MIT",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:fixture": "node scripts/build.mjs --fixture",
     "watch": "node scripts/build.mjs --watch",
-    "fixture": "python3 -m http.server 8080 --directory fixtures",
-    "test": "vitest run && playwright test",
+    "fixture": "python3 -m http.server 18080 --directory fixtures",
+    "test": "node scripts/build.mjs --fixture && vitest run && playwright test",
     "test:unit": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "node scripts/build.mjs --fixture && playwright test"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

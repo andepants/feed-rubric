@@ -14,12 +14,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://x.com/*",
-        "https://twitter.com/*",
-        "http://127.0.0.1:8080/*",
-        "http://127.0.0.1:18080/*"
-      ],
+      "matches": ["https://x.com/*", "https://twitter.com/*"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"

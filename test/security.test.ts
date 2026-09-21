@@ -26,12 +26,10 @@ describe("origin allowlists", () => {
     expect(isAllowedClassifyOrigin(originOf("https://twitter.com/i/status/1"))).toBe(
       true,
     );
-    expect(isAllowedClassifyOrigin(originOf("http://127.0.0.1:8080/timeline.html"))).toBe(
-      true,
-    );
     expect(isAllowedClassifyOrigin(originOf("http://127.0.0.1:18080/timeline.html"))).toBe(
       true,
     );
+    expect(isAllowedClassifyOrigin(originOf("http://127.0.0.1:8080/"))).toBe(false);
     expect(isAllowedClassifyOrigin(originOf("http://127.0.0.1:3000/"))).toBe(false);
     expect(isAllowedClassifyOrigin(originOf("http://localhost:8080/"))).toBe(false);
     expect(isAllowedClassifyOrigin(originOf("https://evil.example/"))).toBe(false);
@@ -39,7 +37,8 @@ describe("origin allowlists", () => {
   });
 
   it("treats only loopback fixture ports as fixture hosts", () => {
-    expect(isFixtureOrigin(originOf("http://127.0.0.1:8080/timeline.html"))).toBe(true);
+    expect(isFixtureOrigin(originOf("http://127.0.0.1:18080/timeline.html"))).toBe(true);
+    expect(isFixtureOrigin(originOf("http://127.0.0.1:8080/timeline.html"))).toBe(false);
     expect(isFixtureOrigin(originOf("https://x.com/home"))).toBe(false);
     expect(isFixtureOrigin(originOf("http://localhost:8080/"))).toBe(false);
   });
@@ -136,5 +135,26 @@ describe("content script storage isolation", () => {
     expect(source).not.toMatch(/postMessage/);
     expect(source).not.toMatch(/\beval\s*\(/);
     expect(source).not.toMatch(/innerHTML/);
+  });
+});
+
+describe("store-ready production manifest", () => {
+  it("does not inject into localhost and does not ship host_permissions for it", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        join(dirname(fileURLToPath(import.meta.url)), "..", "extension-src", "manifest.json"),
+        "utf8",
+      ),
+    ) as {
+      host_permissions: string[];
+      content_scripts: { matches: string[] }[];
+    };
+    const haystack = [
+      ...manifest.host_permissions,
+      ...manifest.content_scripts.flatMap((script) => script.matches),
+    ].join(" ");
+    expect(haystack).not.toMatch(/127\.0\.0\.1/);
+    expect(haystack).not.toMatch(/localhost/);
+    expect(manifest.host_permissions).toEqual(["https://api.typesafe.ai/*"]);
   });
 });

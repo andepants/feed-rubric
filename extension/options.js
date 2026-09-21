@@ -317,4 +317,3 @@ chrome.storage.onChanged.addListener((changes, area) => {
   renderLastError(changes[LAST_ERROR_KEY].newValue);
 });
 void loadForm();
-//# sourceMappingURL=options.js.map

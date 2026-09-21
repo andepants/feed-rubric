@@ -39,7 +39,7 @@ Three editable, disable-able categories ship by default (threshold **0.75**). Ea
 | `crypto_promo` | Shills a token, exchange, wallet, or get-rich scheme | Policy/market news, education without a buy pitch |
 | `unsolicited_politics` | Partisan argument or campaign ask | Neutral headline/report, or not electoral politics |
 
-Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). Hidden posts collapse to a slim **Undo** row. The last classify error and a cache-clear button live on Options.
+Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). Hidden posts collapse to a slim **Undo** row. **Undo is session-ephemeral (v0)** — a reload or a new article node from X's renderer can hide the post again until you change the rubric. The last classify error and a cache-clear button live on Options.
 
 ## Load unpacked in Chrome
 
@@ -63,7 +63,7 @@ Work the fixture first, then x.com. Selectors break; fail-open means a miss leav
 
 1. **Load unpacked** — `chrome://extensions` → Developer mode → Load unpacked → `extension/` folder.
 2. **Options + API key** — right-click the extension icon → Options (or popup → Open settings). Paste your TypeSafe key. It stays in `chrome.storage.local` on this machine and is used only by the service worker. Saving wipes the score cache. The cache key also includes a hash of threshold + enabled category instructions, so old scores cannot apply to a new rubric.
-3. **Fixture first (no X)** — `npm test` (needs Chromium once: `npx playwright install chromium`). Then `npm run fixture` and open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html) with the extension loaded. Tweets 1–3 collapse to a slim **Undo** row at the default threshold; the rest stay visible.
+3. **Fixture first (no X)** — `npm test` (needs Chromium once: `npx playwright install chromium`). Then `npm run build:fixture && npm run fixture` and open [http://127.0.0.1:18080/timeline.html](http://127.0.0.1:18080/timeline.html) with that unpacked build. Tweets 1–3 collapse to a slim **Undo** row at the default threshold; the rest stay visible. Production `npm run build` does not inject on loopback.
 4. **Then x.com** — open a timeline on your own account. If nothing hides, check Options for the last error (missing key, rate limit, API failure) and that categories are enabled. x.com selectors live in `src/sites/x.ts` as a fallback chain. Live classify needs `https://api.typesafe.ai/*` host permission (shipped in the manifest).
 5. **Privacy reminder** — only post text, author handle, and your category instructions go to `https://api.typesafe.ai/v1/systemone`. No cookies, DMs, page HTML, or telemetry. Use your own key (BYOK). There is no backend.
 
@@ -72,16 +72,16 @@ Work the fixture first, then x.com. Selectors break; fail-open means a miss leav
 Three fixture tweets include hardcoded `data-feed-rubric-scores` so you can demo the hide loop without a key:
 
 ```bash
-npm test          # vitest + Playwright fixture smoke (no X)
-npm run fixture   # serve fixtures/ on :8080
+npm test            # fixture build + vitest + Playwright smoke (no X)
+npm run build:fixture && npm run fixture   # serve fixtures/ on :18080
 ```
 
-Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html). Tweets 1–3 collapse to an Undo row at the default threshold; the rest stay visible.
+Open [http://127.0.0.1:18080/timeline.html](http://127.0.0.1:18080/timeline.html). Tweets 1–3 collapse to an Undo row at the default threshold; the rest stay visible.
 
 ## Architecture
 
 ```
-content script (x.com + 127.0.0.1:8080/:18080 fixtures)
+content script (x.com; fixture build also injects 127.0.0.1:18080)
   → extract text + post id
   → chrome.runtime.sendMessage (no API key)
 service worker
@@ -101,10 +101,11 @@ x.com selectors live in `src/sites/x.ts` and are expected to break.
 ```bash
 npm install
 npx playwright install chromium
-npm test           # vitest unit + Playwright unpacked-extension smoke
-npm run build      # compile TS → extension/
-npm run watch      # rebuild on change
-npm run fixture    # serve fixtures/ on :8080
+npm test              # fixture build + vitest + Playwright unpacked-extension smoke
+npm run build         # production compile TS → extension/ (no sourcemaps, no localhost)
+npm run build:fixture # same bundle with 127.0.0.1:18080 content-script matches
+npm run watch         # rebuild on change (fixture matches on)
+npm run fixture       # serve fixtures/ on :18080
 ```
 
 Source layout:

@@ -1,16 +1,12 @@
 /** Origins allowed to send classify messages. Keep in sync with manifest matches. */
-export const CLASSIFY_ORIGINS = new Set([
-  "https://x.com",
-  "https://twitter.com",
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:18080",
-]);
+export const LIVE_ORIGINS = ["https://x.com", "https://twitter.com"] as const;
 
-/** Local fixture servers only — never live TypeSafe calls from these. */
-export const FIXTURE_ORIGINS = new Set([
-  "http://127.0.0.1:8080",
-  "http://127.0.0.1:18080",
-]);
+/** Loopback fixture server (`npm run fixture` / Playwright). Never a TypeSafe caller. */
+export const FIXTURE_ORIGIN = "http://127.0.0.1:18080";
+
+export const CLASSIFY_ORIGINS = new Set<string>([...LIVE_ORIGINS, FIXTURE_ORIGIN]);
+
+export const FIXTURE_ORIGINS = new Set<string>([FIXTURE_ORIGIN]);
 
 export function originOf(url: string | undefined): string | null {
   if (!url) return null;
