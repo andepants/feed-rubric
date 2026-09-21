@@ -105,12 +105,18 @@ function enabledCategoryIds(categories) {
 async function loadSettings() {
   const stored = await chrome.storage.local.get([
     "apiKey",
+    "hasApiKey",
+    "enabled",
     "threshold",
     "categories",
     "debug"
   ]);
+  const apiKey = typeof stored.apiKey === "string" ? stored.apiKey : "";
+  const hasApiKey = stored.hasApiKey === true || stored.hasApiKey !== false && apiKey.length > 0;
   return {
-    apiKey: typeof stored.apiKey === "string" ? stored.apiKey : "",
+    apiKey,
+    hasApiKey,
+    enabled: stored.enabled !== false,
     threshold: typeof stored.threshold === "number" ? clampThreshold(stored.threshold) : DEFAULT_THRESHOLD,
     categories: normalizeCategories(stored.categories),
     debug: stored.debug === true
@@ -142,6 +148,9 @@ function cacheKey(args) {
 function planClassify(args) {
   if (!args.validPost) {
     return { kind: "fail_open", error: "invalid_post" };
+  }
+  if (!args.enabled) {
+    return { kind: "fail_open", error: "disabled" };
   }
   if (args.cached) {
     return { kind: "cache", result: args.cached };
@@ -199,7 +208,10 @@ function parseSystemOneResponse(value) {
     const parsed = parseNoulAnswer(answer);
     if (parsed) answers[id] = parsed;
   }
-  const model = typeof value.model === "string" ? value.model : JEV_MODEL;
+  const model = typeof value.model === "string" ? value.model : "";
+  if (model !== JEV_MODEL) {
+    throw new Error("unexpected_jev_model");
+  }
   return { model, answers };
 }
 async function classifyPost(apiKey, state, categories) {
@@ -265,14 +277,14 @@ function classifySenderOrigin(sender) {
   return originOf(sender.url) ?? (sender.origin ? originOf(sender.origin) : null);
 }
 function isTrustedClassifySender(sender, extensionId) {
-  if (sender.id && sender.id !== extensionId) return false;
+  if (!sender.id || sender.id !== extensionId) return false;
   return isAllowedClassifyOrigin(classifySenderOrigin(sender));
 }
 function isFixtureSender(sender) {
   return isFixtureOrigin(classifySenderOrigin(sender));
 }
 function isExtensionPageSender(sender, extensionId) {
-  if (sender.id && sender.id !== extensionId) return false;
+  if (!sender.id || sender.id !== extensionId) return false;
   return isExtensionPageUrl(sender.url, extensionId);
 }
 
@@ -321,6 +333,9 @@ function isClassifyRequest(message) {
 }
 function isClearCacheRequest(message) {
   return isRecord(message) && message.type === "clearCache";
+}
+function isGetStateRequest(message) {
+  return isRecord(message) && message.type === "getState";
 }
 
 // src/background.ts
@@ -414,7 +429,8 @@ async function handleClassify(req) {
     fixtureScores: parseScoreMap(req.fixtureScores),
     allowFixture: req.allowFixture === true,
     allowApi: req.allowApi !== false,
-    hasApiKey: settings.apiKey.length > 0,
+    enabled: settings.enabled,
+    hasApiKey: settings.hasApiKey,
     rateLimited: isRateLimited({
       timestamps: callTimestamps,
       now: Date.now(),
@@ -436,7 +452,9 @@ async function handleClassify(req) {
       return withDebug(result, settings.debug);
     }
     case "fail_open": {
-      await recordError(plan.error);
+      if (plan.error !== "disabled") {
+        await recordError(plan.error);
+      }
       if (plan.error === "rate_limited") {
         return withDebug({ ...failOpen(plan.error), rateLimited: true }, settings.debug);
       }
@@ -479,8 +497,36 @@ async function handleClassify(req) {
     }
   }
 }
+async function broadcastSettingsChanged(enabled) {
+  const payload = { type: "settingsChanged", enabled };
+  const patterns = [...LIVE_ORIGINS, "http://127.0.0.1:18080/*"];
+  try {
+    const tabs = await chrome.tabs.query({ url: patterns });
+    for (const tab of tabs) {
+      if (tab.id === void 0) continue;
+      void chrome.tabs.sendMessage(tab.id, payload).catch(() => void 0);
+    }
+  } catch {
+  }
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if ("enabled" in changes || "apiKey" in changes || "hasApiKey" in changes || "threshold" in changes || "categories" in changes) {
+    void loadSettings().then((settings) => broadcastSettingsChanged(settings.enabled));
+  }
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const extensionId = chrome.runtime.id;
+  if (isGetStateRequest(message)) {
+    void loadSettings().then((settings) => {
+      const response = { type: "state", enabled: settings.enabled };
+      sendResponse(response);
+    }).catch(() => {
+      const response = { type: "state", enabled: true };
+      sendResponse(response);
+    });
+    return true;
+  }
   if (isClearCacheRequest(message)) {
     if (!isExtensionPageSender(sender, extensionId)) {
       const response = { type: "cacheCleared", cleared: 0 };

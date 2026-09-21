@@ -38,19 +38,27 @@ async function init() {
   const status = document.getElementById("status");
   if (!status) return;
   try {
-    const stored = await chrome.storage.local.get(["apiKey", "threshold", "categories"]);
-    const hasKey = typeof stored.apiKey === "string" && stored.apiKey.length > 0;
+    const stored = await chrome.storage.local.get([
+      "hasApiKey",
+      "enabled",
+      "threshold",
+      "categories"
+    ]);
+    const hasKey = stored.hasApiKey === true;
+    const enabled = stored.enabled !== false;
     const threshold = typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD;
     const categories = Array.isArray(stored.categories) ? stored.categories : DEFAULT_CATEGORIES;
-    const enabled = categories.filter((c) => {
+    const enabledCategories = categories.filter((c) => {
       return typeof c === "object" && c !== null && "enabled" in c && c.enabled === true;
     }).length;
-    if (!hasKey) {
+    if (!enabled) {
+      status.textContent = "Paused \u2014 all posts stay visible.";
+    } else if (!hasKey) {
       status.textContent = "No API key \u2014 posts stay visible (fail open).";
-    } else if (enabled === 0) {
+    } else if (enabledCategories === 0) {
       status.textContent = "No categories enabled \u2014 nothing will hide.";
     } else {
-      status.textContent = `${enabled} categories \xB7 threshold ${threshold}`;
+      status.textContent = `${enabledCategories} categories \xB7 threshold ${threshold}`;
     }
   } catch {
     status.textContent = "Could not load settings. Open options to retry.";

@@ -23,8 +23,11 @@ import type {
   ClassifyResponse,
   ClassifyResult,
   CacheClearedResponse,
+  SettingsChangedMessage,
+  StateResponse,
 } from "./types.js";
-import { isClassifyRequest, isClearCacheRequest } from "./types.js";
+import { isClassifyRequest, isClearCacheRequest, isGetStateRequest } from "./types.js";
+import { LIVE_ORIGINS } from "./origins.js";
 
 const CACHE_PREFIX = "feed-rubric:cache:";
 
@@ -129,7 +132,8 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
     fixtureScores: parseScoreMap(req.fixtureScores),
     allowFixture: req.allowFixture === true,
     allowApi: req.allowApi !== false,
-    hasApiKey: settings.apiKey.length > 0,
+    enabled: settings.enabled,
+    hasApiKey: settings.hasApiKey,
     rateLimited: isRateLimited({
       timestamps: callTimestamps,
       now: Date.now(),
@@ -152,7 +156,9 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
       return withDebug(result, settings.debug);
     }
     case "fail_open": {
-      await recordError(plan.error);
+      if (plan.error !== "disabled") {
+        await recordError(plan.error);
+      }
       if (plan.error === "rate_limited") {
         return withDebug({ ...failOpen(plan.error), rateLimited: true }, settings.debug);
       }
@@ -196,8 +202,48 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   }
 }
 
+async function broadcastSettingsChanged(enabled: boolean): Promise<void> {
+  const payload: SettingsChangedMessage = { type: "settingsChanged", enabled };
+  const patterns = [...LIVE_ORIGINS, "http://127.0.0.1:18080/*"];
+  try {
+    const tabs = await chrome.tabs.query({ url: patterns });
+    for (const tab of tabs) {
+      if (tab.id === undefined) continue;
+      void chrome.tabs.sendMessage(tab.id, payload).catch(() => undefined);
+    }
+  } catch {
+    // Fail open: content scripts pick up state on next getState.
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  if (
+    "enabled" in changes ||
+    "apiKey" in changes ||
+    "hasApiKey" in changes ||
+    "threshold" in changes ||
+    "categories" in changes
+  ) {
+    void loadSettings().then((settings) => broadcastSettingsChanged(settings.enabled));
+  }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const extensionId = chrome.runtime.id;
+
+  if (isGetStateRequest(message)) {
+    void loadSettings()
+      .then((settings) => {
+        const response: StateResponse = { type: "state", enabled: settings.enabled };
+        sendResponse(response);
+      })
+      .catch(() => {
+        const response: StateResponse = { type: "state", enabled: true };
+        sendResponse(response);
+      });
+    return true;
+  }
 
   if (isClearCacheRequest(message)) {
     if (!isExtensionPageSender(sender, extensionId)) {

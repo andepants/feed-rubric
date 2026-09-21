@@ -39,7 +39,7 @@ Three editable, disable-able categories ship by default (threshold **0.75**). Ea
 | `crypto_promo` | Shills a token, exchange, wallet, or get-rich scheme | Policy/market news, education without a buy pitch |
 | `unsolicited_politics` | Partisan argument or campaign ask | Neutral headline/report, or not electoral politics |
 
-Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). Hidden posts collapse to a slim **Undo** row. **Undo is session-ephemeral (v0)** — a reload or a new article node from X's renderer can hide the post again until you change the rubric. The last classify error and a cache-clear button live on Options.
+Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). Pause filtering with **Enable feed filtering**. Hidden posts collapse to a slim **Undo** row. **Undo is session-ephemeral (v0)** — a reload or a new article node from X's renderer can hide the post again until you change the rubric. The last classify error and a cache-clear button live on Options. See [PRIVACY.md](PRIVACY.md) for what data leaves your machine.
 
 ## Load unpacked in Chrome
 

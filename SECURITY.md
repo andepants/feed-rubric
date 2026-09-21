@@ -24,6 +24,9 @@ Defensive notes for this owned MV3 extension. Not an exploit write-up.
 | Medium | `chrome.runtime.onMessage` did not check sender; content scripts could clear cache. | Classify allowlist; `clearCache` only from `chrome-extension://<id>/`. |
 | Medium | Options built category fields with `innerHTML`. | DOM APIs only; last-error uses `textContent`. |
 | Low | Undo row could disappear if the host rewrote article children. | Remount placeholder from stored reasons. Untrusted synthetic clicks ignored. |
+| Medium | Jev response `model` was not verified against the pinned `jev-1.13.0`. | Reject mismatched models; classify fails open. |
+| Medium | Classify messages accepted without `sender.id`. | Require `sender.id === extensionId` for classify and cache-clear. |
+| Medium | Popup read the raw API key to show status. | Popup reads `hasApiKey` only; key stays on options + service worker. |
 
 ## Fail-open (do not regress)
 

@@ -32,12 +32,26 @@ export interface ClearCacheRequest {
   type: "clearCache";
 }
 
+export interface GetStateRequest {
+  type: "getState";
+}
+
+export interface StateResponse {
+  type: "state";
+  enabled: boolean;
+}
+
+export interface SettingsChangedMessage {
+  type: "settingsChanged";
+  enabled: boolean;
+}
+
 export interface CacheClearedResponse {
   type: "cacheCleared";
   cleared: number;
 }
 
-export type ExtensionRequest = ClassifyRequest | ClearCacheRequest;
+export type ExtensionRequest = ClassifyRequest | ClearCacheRequest | GetStateRequest;
 
 export function isClassifyRequest(message: unknown): message is ClassifyRequest {
   if (!isRecord(message)) return false;
@@ -52,4 +66,8 @@ export function isClassifyRequest(message: unknown): message is ClassifyRequest 
 
 export function isClearCacheRequest(message: unknown): message is ClearCacheRequest {
   return isRecord(message) && message.type === "clearCache";
+}
+
+export function isGetStateRequest(message: unknown): message is GetStateRequest {
+  return isRecord(message) && message.type === "getState";
 }

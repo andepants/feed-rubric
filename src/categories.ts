@@ -65,6 +65,8 @@ export const DEFAULT_CATEGORIES: Category[] = [
 
 export interface Settings {
   apiKey: string;
+  hasApiKey: boolean;
+  enabled: boolean;
   threshold: number;
   categories: Category[];
   debug: boolean;
@@ -72,6 +74,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
+  hasApiKey: false,
+  enabled: true,
   threshold: DEFAULT_THRESHOLD,
   categories: DEFAULT_CATEGORIES,
   debug: false,
@@ -132,13 +136,22 @@ export function enabledCategoryIds(categories: Category[]): Set<string> {
 export async function loadSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get([
     "apiKey",
+    "hasApiKey",
+    "enabled",
     "threshold",
     "categories",
     "debug",
   ]);
 
+  const apiKey = typeof stored.apiKey === "string" ? stored.apiKey : "";
+  const hasApiKey =
+    stored.hasApiKey === true ||
+    (stored.hasApiKey !== false && apiKey.length > 0);
+
   return {
-    apiKey: typeof stored.apiKey === "string" ? stored.apiKey : "",
+    apiKey,
+    hasApiKey,
+    enabled: stored.enabled !== false,
     threshold:
       typeof stored.threshold === "number"
         ? clampThreshold(stored.threshold)
