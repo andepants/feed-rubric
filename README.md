@@ -31,15 +31,15 @@ Errors, rate limits, missing API key, and ambiguous noul scores (near 0.5) **nev
 
 ## Default categories
 
-Three editable, disable-able categories ship by default (threshold **0.75**):
+Three editable, disable-able categories ship by default (threshold **0.75**). Each is a noul (yes/no) with explicit true/false criteria — not a chat prompt.
 
-| ID | What it catches |
-| --- | --- |
-| `rage_bait` | Posts written to provoke outrage or pile-ons rather than inform |
-| `crypto_promo` | Token/exchange/wallet shilling (not neutral policy news) |
-| `unsolicited_politics` | Partisan arguments or campaign messages (not neutral headlines) |
+| ID | True (hide) | False (show) |
+| --- | --- | --- |
+| `rage_bait` | Written to inflame: dunks, pile-ons, "get furious" | Informs, reports, or makes a real argument (including sarcasm) |
+| `crypto_promo` | Shills a token, exchange, wallet, or get-rich scheme | Policy/market news, education without a buy pitch |
+| `unsolicited_politics` | Partisan argument or campaign ask | Neutral headline/report, or not electoral politics |
 
-Change instructions, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup).
+Change instructions, true/false criteria, threshold, or toggles on the **options page** (right-click extension icon → Options, or open from the popup). The last classify error and a cache-clear button live there too.
 
 ## Load unpacked in Chrome
 
@@ -53,15 +53,26 @@ Change instructions, threshold, or toggles on the **options page** (right-click 
 4. Click **Load unpacked** and select the `extension/` folder
 5. Visit [x.com](https://x.com) or run the fixture timeline (below)
 
+## Testing on X
+
+Work the fixture first, then x.com. Selectors break; fail-open means a miss leaves posts visible.
+
+1. **Load unpacked** — `chrome://extensions` → Developer mode → Load unpacked → `extension/` folder.
+2. **Options + API key** — right-click the extension icon → Options (or popup → Open settings). Paste your TypeSafe key. It stays in `chrome.storage.local` on this machine and is used only by the service worker.
+3. **Fixture first (no X, no TypeSafe network required for the hide loop)** — `npm test` applies dry-run scores from `fixtures/timeline.html` and asserts tweets 1–3 hide. Then `npm run fixture` and open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html) with the extension loaded. Tweets 1–3 hide at the default threshold; the rest stay visible. Enable **Debug** to see a faint chip on hidden posts (click to unhide).
+4. **Then x.com** — open a timeline. If nothing hides, check Options for the last error (missing key, rate limit, API failure) and that categories are enabled. x.com selectors live in `src/sites/x.ts`.
+5. **Privacy reminder** — only post text, author handle, and your category instructions go to `https://api.typesafe.ai/v1/systemone`. No cookies, DMs, page HTML, or telemetry. Use your own key (BYOK). There is no backend.
+
 ## Fixture timeline (no API key required)
 
 Three fixture tweets include hardcoded `data-feed-rubric-scores` so you can demo the hide loop without a key:
 
 ```bash
-npm run fixture
+npm test          # jsdom smoke: hide loop, no network
+npm run fixture   # serve fixtures/ on :8080
 ```
 
-Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html). Tweets 1–3 should hide at the default threshold; the rest stay visible. Enable **Debug** in settings to see a faint chip on hidden posts (click to unhide).
+Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html). Tweets 1–3 should hide at the default threshold; the rest stay visible.
 
 ## Architecture
 
@@ -84,6 +95,7 @@ x.com selectors live in `src/sites/x.ts` and are expected to break.
 
 ```bash
 npm install
+npm test           # vitest + jsdom hide-loop smoke (no network)
 npm run build      # compile TS → extension/
 npm run watch      # rebuild on change
 npm run fixture    # serve fixtures/ on :8080
@@ -92,10 +104,12 @@ npm run fixture    # serve fixtures/ on :8080
 Source layout:
 
 - `src/jev.ts` — thin fetch wrapper for System One
-- `src/categories.ts` — defaults and settings helpers
-- `src/sites/x.ts` — x.com DOM adapter
+- `src/categories.ts` — defaults, noul criteria, settings helpers
+- `src/sites/x.ts` — x.com DOM adapter (documented selectors, fail-open)
+- `src/score.ts` / `src/hide.ts` — pure score evaluation and hide attribute
 - `extension/` — loadable unpacked extension (built artifacts)
 - `fixtures/timeline.html` — 8 fake tweets for local testing
+- `test/hide-loop.test.ts` — fixture hide-loop smoke
 
 ## License
 

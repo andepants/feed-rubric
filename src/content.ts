@@ -1,29 +1,38 @@
+import { applyHideState } from "./hide.js";
+import { isHtmlElement, isRecord } from "./guard.js";
+import { parseFixtureScores, parseScoreMap } from "./score.js";
 import {
   extractAuthor,
   extractPostId,
   extractText,
   findTweetArticles,
   isFixtureHost,
+  isTweetArticle,
   PLATFORM,
 } from "./sites/x.js";
-import type { ClassifyRequest, ClassifyResponse } from "./types.js";
+import type { ClassifyRequest, ClassifyResult } from "./types.js";
 
 const VISIBILITY_THRESHOLD = 0.55;
 const pending = new Set<string>();
 const observed = new WeakSet<HTMLElement>();
 
-function parseFixtureScores(article: HTMLElement): Record<string, number> | undefined {
-  const raw = article.dataset.feedRubricScores;
-  if (!raw) return undefined;
-  try {
-    return JSON.parse(raw) as Record<string, number>;
-  } catch {
-    return undefined;
-  }
-}
-
 function platformForHost(): string {
   return isFixtureHost() ? "fixture" : PLATFORM;
+}
+
+function parseClassifyResult(value: unknown): ClassifyResult | undefined {
+  if (!isRecord(value)) return undefined;
+  const result = value.result;
+  if (!isRecord(result)) return undefined;
+  if (typeof result.hide !== "boolean") return undefined;
+  const reasons = Array.isArray(result.reasons)
+    ? result.reasons.filter((reason): reason is string => typeof reason === "string")
+    : [];
+  return {
+    hide: result.hide,
+    reasons,
+    scores: parseScoreMap(result.scores) ?? {},
+  };
 }
 
 async function requestClassification(
@@ -31,21 +40,24 @@ async function requestClassification(
   postId: string,
 ): Promise<void> {
   if (pending.has(postId)) return;
+
+  const text = extractText(article);
+  if (!text) return;
+
   pending.add(postId);
 
-  const fixtureScores = parseFixtureScores(article);
   const message: ClassifyRequest = {
     type: "classify",
     platform: platformForHost(),
     postId,
     author: extractAuthor(article),
-    text: extractText(article),
-    fixtureScores,
+    text,
+    fixtureScores: parseFixtureScores(article.dataset.feedRubricScores),
   };
 
   try {
-    const response = (await chrome.runtime.sendMessage(message)) as ClassifyResponse;
-    applyResult(article, response?.result);
+    const response: unknown = await chrome.runtime.sendMessage(message);
+    applyResult(article, parseClassifyResult(response));
   } catch (err) {
     console.warn("[feed-rubric] message failed:", err);
   } finally {
@@ -55,22 +67,21 @@ async function requestClassification(
 
 function applyResult(
   article: HTMLElement,
-  result: ClassifyResponse["result"] | undefined,
+  result: ClassifyResult | undefined,
 ): void {
   if (!result) return;
 
-  article.removeAttribute("data-feed-rubric-hide");
   article.querySelector(".feed-rubric-debug-chip")?.remove();
+  applyHideState({ article, hide: result.hide });
 
   if (result.hide) {
-    article.setAttribute("data-feed-rubric-hide", "true");
-    maybeShowDebugChip(article, result);
+    void maybeShowDebugChip(article, result);
   }
 }
 
 async function maybeShowDebugChip(
   article: HTMLElement,
-  result: ClassifyResponse["result"],
+  result: ClassifyResult,
 ): Promise<void> {
   const stored = await chrome.storage.local.get("debug");
   if (stored.debug !== true) return;
@@ -87,7 +98,7 @@ async function maybeShowDebugChip(
   chip.textContent = `hidden · ${result.reasons.join(", ")} · ${top}`;
   chip.addEventListener("click", (e) => {
     e.stopPropagation();
-    article.removeAttribute("data-feed-rubric-hide");
+    applyHideState({ article, hide: false });
     chip.remove();
   });
   article.style.position ||= "relative";
@@ -98,11 +109,12 @@ const observer = new IntersectionObserver(
   (entries) => {
     for (const entry of entries) {
       if (entry.intersectionRatio < VISIBILITY_THRESHOLD) continue;
-      const article = entry.target as HTMLElement;
-      const postId = extractPostId(article);
+      const target = entry.target;
+      if (!isHtmlElement(target)) continue;
+      const postId = extractPostId(target);
       if (!postId) continue;
-      observer.unobserve(article);
-      void requestClassification(article, postId);
+      observer.unobserve(target);
+      void requestClassification(target, postId);
     }
   },
   { threshold: [0, VISIBILITY_THRESHOLD, 1] },
@@ -114,7 +126,7 @@ function observeTweet(article: HTMLElement): void {
   observer.observe(article);
 }
 
-function scan(root: ParentNode = document): void {
+function scan(root: ParentNode | null | undefined): void {
   for (const article of findTweetArticles(root)) {
     observeTweet(article);
   }
@@ -123,14 +135,25 @@ function scan(root: ParentNode = document): void {
 const mutationObserver = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
-      if (!(node instanceof HTMLElement)) continue;
-      if (node.matches?.('article[data-testid="tweet"]')) {
+      if (isTweetArticle(node)) {
         observeTweet(node);
       }
-      scan(node);
+      if ("querySelectorAll" in node) {
+        scan(node);
+      }
     }
   }
 });
 
-scan();
-mutationObserver.observe(document.body, { childList: true, subtree: true });
+function start(): void {
+  scan(document);
+  const body = document.body;
+  if (!body) return;
+  mutationObserver.observe(body, { childList: true, subtree: true });
+}
+
+if (document.body) {
+  start();
+} else {
+  document.addEventListener("DOMContentLoaded", start, { once: true });
+}

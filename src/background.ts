@@ -1,14 +1,15 @@
-import { loadSettings } from "./categories.js";
-import {
-  classifyPost,
-  isConfidentYes,
-  type PostState,
-} from "./jev.js";
+import { enabledCategoryIds, loadSettings } from "./categories.js";
+import { isRecord } from "./guard.js";
+import { classifyPost, type PostState } from "./jev.js";
+import { LAST_ERROR_KEY, type LastError } from "./last-error.js";
+import { evaluateScores, failOpen, parseScoreMap } from "./score.js";
 import type {
   ClassifyRequest,
   ClassifyResponse,
   ClassifyResult,
+  CacheClearedResponse,
 } from "./types.js";
+import { isClassifyRequest, isClearCacheRequest } from "./types.js";
 
 const RATE_LIMIT = 40;
 const RATE_WINDOW_MS = 60_000;
@@ -33,10 +34,24 @@ function recordCall(): void {
   callTimestamps.push(Date.now());
 }
 
+async function recordError(message: string): Promise<void> {
+  const lastError: LastError = { message, at: Date.now() };
+  await chrome.storage.local.set({ [LAST_ERROR_KEY]: lastError });
+}
+
 async function readSessionCache(key: string): Promise<ClassifyResult | null> {
   const stored = await chrome.storage.session.get(CACHE_PREFIX + key);
-  const entry = stored[CACHE_PREFIX + key] as ClassifyResult | undefined;
-  return entry ?? null;
+  const entry = stored[CACHE_PREFIX + key];
+  if (!isRecord(entry)) return null;
+  if (typeof entry.hide !== "boolean") return null;
+  if (!Array.isArray(entry.reasons)) return null;
+  const scores = parseScoreMap(entry.scores);
+  return {
+    hide: entry.hide,
+    reasons: entry.reasons.filter((r): r is string => typeof r === "string"),
+    scores: scores ?? {},
+    cached: true,
+  };
 }
 
 async function writeSessionCache(key: string, result: ClassifyResult): Promise<void> {
@@ -65,50 +80,39 @@ async function setCached(
   await writeSessionCache(key, result);
 }
 
-function evaluateScores(
-  scores: Record<string, number>,
-  enabledIds: Set<string>,
-  threshold: number,
-): ClassifyResult {
-  const reasons: string[] = [];
-  let hide = false;
-
-  for (const [id, noul] of Object.entries(scores)) {
-    if (!enabledIds.has(id)) continue;
-    if (noul >= threshold && isConfidentYes(noul)) {
-      hide = true;
-      reasons.push(id);
-    }
+async function clearCache(): Promise<number> {
+  const memory = memoryCache.size;
+  memoryCache.clear();
+  const all: Record<string, unknown> = await chrome.storage.session.get(null);
+  const keys = Object.keys(all).filter((key) => key.startsWith(CACHE_PREFIX));
+  if (keys.length > 0) {
+    await chrome.storage.session.remove(keys);
   }
-
-  return { hide, reasons, scores };
-}
-
-function failOpen(error?: string): ClassifyResult {
-  return { hide: false, reasons: [], scores: {}, error };
+  return memory + keys.length;
 }
 
 async function classifyWithFixture(
   fixtureScores: Record<string, number>,
   threshold: number,
-  enabledIds: Set<string>,
+  enabledIds: ReadonlySet<string>,
 ): Promise<ClassifyResult> {
-  return evaluateScores(fixtureScores, enabledIds, threshold);
+  return evaluateScores({ scores: fixtureScores, enabledIds, threshold });
 }
 
 async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   const settings = await loadSettings();
   const enabled = settings.categories.filter((c) => c.enabled);
-  const enabledIds = new Set(enabled.map((c) => c.id));
+  const enabledIds = enabledCategoryIds(settings.categories);
 
   const cached = await getCached(req.platform, req.postId);
   if (cached) {
     return { ...cached, cached: true };
   }
 
-  if (req.fixtureScores && Object.keys(req.fixtureScores).length > 0) {
+  const fixtureScores = parseScoreMap(req.fixtureScores);
+  if (fixtureScores) {
     const result = await classifyWithFixture(
-      req.fixtureScores,
+      fixtureScores,
       settings.threshold,
       enabledIds,
     );
@@ -117,10 +121,12 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   }
 
   if (!settings.apiKey) {
+    await recordError("no_api_key");
     return failOpen("no_api_key");
   }
 
   if (isRateLimited()) {
+    await recordError("rate_limited");
     return { ...failOpen("rate_limited"), rateLimited: true };
   }
 
@@ -131,23 +137,36 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
     const response = await classifyPost(settings.apiKey, state, enabled);
     const scores: Record<string, number> = {};
     for (const [id, answer] of Object.entries(response.answers)) {
-      if (answer?.type === "noul") {
-        scores[id] = answer.noul;
-      }
+      scores[id] = answer.noul;
     }
-    const result = evaluateScores(scores, enabledIds, settings.threshold);
+    const result = evaluateScores({ scores, enabledIds, threshold: settings.threshold });
     await setCached(req.platform, req.postId, result);
     return result;
   } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown_error";
     console.warn("[feed-rubric] classify failed:", err);
-    return failOpen(err instanceof Error ? err.message : "unknown_error");
+    await recordError(message);
+    return failOpen(message);
   }
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "classify") return false;
+  if (isClearCacheRequest(message)) {
+    void clearCache()
+      .then((cleared) => {
+        const response: CacheClearedResponse = { type: "cacheCleared", cleared };
+        sendResponse(response);
+      })
+      .catch(() => {
+        const response: CacheClearedResponse = { type: "cacheCleared", cleared: 0 };
+        sendResponse(response);
+      });
+    return true;
+  }
 
-  handleClassify(message as ClassifyRequest)
+  if (!isClassifyRequest(message)) return false;
+
+  handleClassify(message)
     .then((result) => {
       const response: ClassifyResponse = {
         type: "classifyResult",

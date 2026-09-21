@@ -91,9 +91,30 @@
         color: #fff;
         border-color: #111;
       }
-      #save-status {
+      .field-label {
+        display: block;
+        margin: 8px 0 4px;
+        font-weight: 600;
+        font-size: 12px;
+        color: #555;
+      }
+      #save-status,
+      #cache-status {
         color: #080;
         font-size: 13px;
+      }
+      #last-error {
+        margin: 0 0 12px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #f3f3f3;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 13px;
+      }
+      #last-error.has-error {
+        background: #fdecec;
+        color: #8a1f11;
       }
     </style>
   </head>
@@ -118,7 +139,7 @@
     <fieldset>
       <legend>Categories</legend>
       <div id="categories"></div>
-      <p class="hint">Each enabled category becomes one noul question in a single Jev call per post.</p>
+      <p class="hint">Each enabled category is one noul (yes/no) in a single Jev call per post. True/false criteria pin the boundary; this is not a chatbot.</p>
     </fieldset>
 
     <fieldset>
@@ -127,6 +148,16 @@
         <input id="debug" type="checkbox" />
         Show faint chip on hidden posts (click to unhide)
       </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Runtime</legend>
+      <p id="last-error">No errors recorded.</p>
+      <div class="actions">
+        <button id="clear-cache" type="button">Clear score cache</button>
+        <span id="cache-status"></span>
+      </div>
+      <p class="hint">Clears in-memory and session cached noul scores. Posts will be reclassified on next view.</p>
     </fieldset>
 
     <div class="actions">
