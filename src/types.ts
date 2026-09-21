@@ -7,6 +7,9 @@ export interface ClassifyRequest {
   author: string;
   text: string;
   fixtureScores?: Record<string, number>;
+  /** Set only by the service worker from sender origin — ignored if spoofed. */
+  allowFixture?: boolean;
+  allowApi?: boolean;
 }
 
 export interface ClassifyResult {
@@ -16,6 +19,7 @@ export interface ClassifyResult {
   cached?: boolean;
   rateLimited?: boolean;
   error?: string;
+  debug?: boolean;
 }
 
 export interface ClassifyResponse {

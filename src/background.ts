@@ -4,6 +4,18 @@ import { planClassify } from "./classify-plan.js";
 import { isRecord } from "./guard.js";
 import { classifyPost, type PostState } from "./jev.js";
 import { LAST_ERROR_KEY, type LastError } from "./last-error.js";
+import {
+  clampText,
+  isValidPostId,
+  MAX_AUTHOR_LENGTH,
+  MAX_POST_TEXT_LENGTH,
+  sanitizeErrorMessage,
+} from "./limits.js";
+import {
+  isExtensionPageSender,
+  isFixtureSender,
+  isTrustedClassifySender,
+} from "./messaging.js";
 import { isRateLimited, RATE_LIMIT, RATE_WINDOW_MS, pruneTimestamps } from "./rate-limit.js";
 import { evaluateScores, failOpen, parseScoreMap } from "./score.js";
 import type {
@@ -20,7 +32,10 @@ const memoryCache = new Map<string, ClassifyResult>();
 let callTimestamps: number[] = [];
 
 async function recordError(message: string): Promise<void> {
-  const lastError: LastError = { message, at: Date.now() };
+  const lastError: LastError = {
+    message: sanitizeErrorMessage(message),
+    at: Date.now(),
+  };
   await chrome.storage.local.set({ [LAST_ERROR_KEY]: lastError });
 }
 
@@ -90,6 +105,10 @@ function takeRateLimitSlot(now: number): boolean {
   return true;
 }
 
+function withDebug(result: ClassifyResult, debug: boolean): ClassifyResult {
+  return { ...result, debug };
+}
+
 async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   const settings = await loadSettings();
   const enabled = settings.categories.filter((c) => c.enabled);
@@ -108,6 +127,8 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
   const plan = planClassify({
     cached,
     fixtureScores: parseScoreMap(req.fixtureScores),
+    allowFixture: req.allowFixture === true,
+    allowApi: req.allowApi !== false,
     hasApiKey: settings.apiKey.length > 0,
     rateLimited: isRateLimited({
       timestamps: callTimestamps,
@@ -115,11 +136,12 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
       limit: RATE_LIMIT,
       windowMs: RATE_WINDOW_MS,
     }),
+    validPost: isValidPostId(req.postId),
   });
 
   switch (plan.kind) {
     case "cache":
-      return { ...plan.result, cached: true };
+      return withDebug({ ...plan.result, cached: true }, settings.debug);
     case "fixture": {
       const result = evaluateScores({
         scores: plan.scores,
@@ -127,20 +149,24 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
         threshold: settings.threshold,
       });
       await setCached(key, result);
-      return result;
+      return withDebug(result, settings.debug);
     }
     case "fail_open": {
       await recordError(plan.error);
-      return plan.error === "rate_limited"
-        ? { ...failOpen(plan.error), rateLimited: true }
-        : failOpen(plan.error);
+      if (plan.error === "rate_limited") {
+        return withDebug({ ...failOpen(plan.error), rateLimited: true }, settings.debug);
+      }
+      return withDebug(failOpen(plan.error), settings.debug);
     }
     case "api": {
-      const state: PostState = { author: req.author, text: req.text };
+      const state: PostState = {
+        author: clampText(req.author, MAX_AUTHOR_LENGTH),
+        text: clampText(req.text, MAX_POST_TEXT_LENGTH),
+      };
       try {
         if (!takeRateLimitSlot(Date.now())) {
           await recordError("rate_limited");
-          return { ...failOpen("rate_limited"), rateLimited: true };
+          return withDebug({ ...failOpen("rate_limited"), rateLimited: true }, settings.debug);
         }
         const response = await classifyPost(settings.apiKey, state, enabled);
         const scores: Record<string, number> = {};
@@ -153,23 +179,32 @@ async function handleClassify(req: ClassifyRequest): Promise<ClassifyResult> {
           threshold: settings.threshold,
         });
         await setCached(key, result);
-        return result;
+        return withDebug(result, settings.debug);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "unknown_error";
-        console.warn("[feed-rubric] classify failed:", err);
+        const message = sanitizeErrorMessage(
+          err instanceof Error ? err.message : "unknown_error",
+        );
+        console.warn("[feed-rubric] classify failed:", message);
         await recordError(message);
-        return failOpen(message);
+        return withDebug(failOpen(message), settings.debug);
       }
     }
     default: {
       const _exhaustive: never = plan;
-      return failOpen(`unhandled_plan:${String(_exhaustive)}`);
+      return withDebug(failOpen(`unhandled_plan:${String(_exhaustive)}`), settings.debug);
     }
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const extensionId = chrome.runtime.id;
+
   if (isClearCacheRequest(message)) {
+    if (!isExtensionPageSender(sender, extensionId)) {
+      const response: CacheClearedResponse = { type: "cacheCleared", cleared: 0 };
+      sendResponse(response);
+      return false;
+    }
     void clearCache()
       .then((cleared) => {
         const response: CacheClearedResponse = { type: "cacheCleared", cleared };
@@ -184,7 +219,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (!isClassifyRequest(message)) return false;
 
-  handleClassify(message)
+  const trusted = isTrustedClassifySender(sender, extensionId);
+  const fixtureSender = isFixtureSender(sender);
+  const request: ClassifyRequest = {
+    ...message,
+    author: clampText(message.author, MAX_AUTHOR_LENGTH),
+    text: clampText(message.text, MAX_POST_TEXT_LENGTH),
+    fixtureScores: fixtureSender ? message.fixtureScores : undefined,
+    allowFixture: fixtureSender,
+    allowApi: trusted && !fixtureSender,
+  };
+
+  if (!trusted) {
+    sendResponse({
+      type: "classifyResult",
+      postId: message.postId,
+      result: failOpen("untrusted_sender"),
+    } satisfies ClassifyResponse);
+    return false;
+  }
+
+  handleClassify(request)
     .then((result) => {
       const response: ClassifyResponse = {
         type: "classifyResult",
@@ -197,7 +252,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({
         type: "classifyResult",
         postId: message.postId,
-        result: failOpen(err instanceof Error ? err.message : "unknown_error"),
+        result: failOpen(
+          sanitizeErrorMessage(err instanceof Error ? err.message : "unknown_error"),
+        ),
       } satisfies ClassifyResponse);
     });
 

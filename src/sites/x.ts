@@ -8,6 +8,7 @@
  */
 
 import { isHtmlElement } from "../guard.js";
+import { isFixtureOrigin } from "../origins.js";
 
 export const PLATFORM = "x";
 
@@ -161,7 +162,7 @@ export function extractText(article: HTMLElement | null | undefined): string {
 
 export function isFixtureHost(): boolean {
   try {
-    return location.hostname === "127.0.0.1" || location.hostname === "localhost";
+    return isFixtureOrigin(location.origin);
   } catch {
     return false;
   }

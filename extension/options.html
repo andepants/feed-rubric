@@ -103,6 +103,14 @@
         color: #080;
         font-size: 13px;
       }
+      #save-status.is-error,
+      #cache-status.is-error {
+        color: #8a1f11;
+      }
+      .empty-state {
+        margin: 0;
+        color: #666;
+      }
       #last-error {
         margin: 0 0 12px;
         padding: 8px 10px;
@@ -126,7 +134,7 @@
       <legend>TypeSafe API</legend>
       <label for="apiKey">API key (BYOK)</label>
       <input id="apiKey" type="password" autocomplete="off" placeholder="ts_…" />
-      <p class="hint">Stored in chrome.storage.local. Used only by the service worker — never sent to content scripts.</p>
+      <p class="hint">Stored in chrome.storage.local. Only the service worker uses it for HTTPS to TypeSafe. Isolated content scripts never receive it, and the page cannot read chrome.storage.</p>
     </fieldset>
 
     <fieldset>
@@ -138,7 +146,7 @@
 
     <fieldset>
       <legend>Categories</legend>
-      <div id="categories"></div>
+      <div id="categories"><p class="empty-state">Loading categories…</p></div>
       <p class="hint">Each enabled category is one noul (yes/no) in a single Jev call per post. True/false criteria pin the boundary; this is not a chatbot.</p>
     </fieldset>
 

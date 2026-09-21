@@ -9,6 +9,9 @@ function applyHideState(args) {
     args.article.removeAttribute(HIDE_ATTR);
   }
 }
+function isHidden(article) {
+  return article.getAttribute(HIDE_ATTR) === "true";
+}
 function placeholderSummary(reasons) {
   const label = reasons.length > 0 ? reasons.join(", ") : "rubric";
   return `Hidden \xB7 ${label}`;
@@ -66,6 +69,15 @@ function parseFixtureScores(raw) {
   } catch {
     return void 0;
   }
+}
+
+// src/origins.ts
+var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:18080"
+]);
+function isFixtureOrigin(origin) {
+  return origin !== null && FIXTURE_ORIGINS.has(origin);
 }
 
 // src/sites/x.ts
@@ -187,7 +199,7 @@ function extractText(article) {
 }
 function isFixtureHost() {
   try {
-    return location.hostname === "127.0.0.1" || location.hostname === "localhost";
+    return isFixtureOrigin(location.origin);
   } catch {
     return false;
   }
@@ -195,6 +207,8 @@ function isFixtureHost() {
 
 // src/content.ts
 var VISIBILITY_THRESHOLD = 0.55;
+var REASONS_ATTR = "data-feed-rubric-reasons";
+var DEBUG_ATTR = "data-feed-rubric-debug";
 var pending = /* @__PURE__ */ new Set();
 var observed = /* @__PURE__ */ new WeakSet();
 function platformForHost() {
@@ -209,12 +223,24 @@ function parseClassifyResult(value) {
   return {
     hide: result.hide,
     reasons,
-    scores: parseScoreMap(result.scores) ?? {}
+    scores: parseScoreMap(result.scores) ?? {},
+    debug: result.debug === true
   };
 }
 function debugDetail(result, debug) {
   if (!debug) return void 0;
   return Object.entries(result.scores).sort(([, a], [, b]) => b - a).slice(0, 2).map(([k, v]) => `${k}:${v.toFixed(2)}`).join(" ");
+}
+function parseStoredReasons(article) {
+  const raw = article.getAttribute(REASONS_ATTR);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => typeof item === "string");
+  } catch {
+    return [];
+  }
 }
 async function requestClassification(article, postId) {
   if (pending.has(postId)) return;
@@ -227,7 +253,7 @@ async function requestClassification(article, postId) {
     postId,
     author: extractAuthor(article),
     text,
-    fixtureScores: parseFixtureScores(article.dataset.feedRubricScores)
+    fixtureScores: isFixtureHost() ? parseFixtureScores(article.dataset.feedRubricScores) : void 0
   };
   try {
     const response = await chrome.runtime.sendMessage(message);
@@ -238,6 +264,22 @@ async function requestClassification(article, postId) {
     pending.delete(postId);
   }
 }
+function bindUndo(article, row) {
+  const undo = row.querySelector(`.${UNDO_CLASS}`);
+  undo?.addEventListener(
+    "click",
+    (event) => {
+      if (!event.isTrusted) return;
+      event.preventDefault();
+      event.stopPropagation();
+      article.removeAttribute(REASONS_ATTR);
+      article.removeAttribute(DEBUG_ATTR);
+      applyHideState({ article, hide: false });
+      removePlaceholder(article);
+    },
+    { capture: true }
+  );
+}
 function mountPlaceholder(article, result, debug) {
   removePlaceholder(article);
   const row = createPlaceholder({
@@ -245,22 +287,37 @@ function mountPlaceholder(article, result, debug) {
     reasons: result.reasons,
     debugDetail: debugDetail(result, debug)
   });
-  const undo = row.querySelector(`.${UNDO_CLASS}`);
-  undo?.addEventListener("click", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    applyHideState({ article, hide: false });
-    removePlaceholder(article);
+  bindUndo(article, row);
+  article.prepend(row);
+}
+function restorePlaceholderIfMissing(article) {
+  if (!isHidden(article)) return;
+  if (article.querySelector(`.${PLACEHOLDER_CLASS}`)) return;
+  const reasons = parseStoredReasons(article);
+  const debugText = article.getAttribute(DEBUG_ATTR) ?? void 0;
+  const row = createPlaceholder({
+    document: article.ownerDocument,
+    reasons,
+    debugDetail: debugText
   });
+  bindUndo(article, row);
   article.prepend(row);
 }
 async function applyResult(article, result) {
   if (!result) return;
   removePlaceholder(article);
   applyHideState({ article, hide: result.hide });
-  if (!result.hide) return;
-  const stored = await chrome.storage.local.get("debug");
-  mountPlaceholder(article, result, stored.debug === true);
+  if (!result.hide) {
+    article.removeAttribute(REASONS_ATTR);
+    article.removeAttribute(DEBUG_ATTR);
+    return;
+  }
+  const debug = result.debug === true;
+  article.setAttribute(REASONS_ATTR, JSON.stringify(result.reasons));
+  const detail = debugDetail(result, debug);
+  if (detail) article.setAttribute(DEBUG_ATTR, detail);
+  else article.removeAttribute(DEBUG_ATTR);
+  mountPlaceholder(article, result, debug);
 }
 var observer = new IntersectionObserver(
   (entries) => {
@@ -277,7 +334,10 @@ var observer = new IntersectionObserver(
   { threshold: [0, VISIBILITY_THRESHOLD, 1] }
 );
 function observeTweet(article) {
-  if (observed.has(article)) return;
+  if (observed.has(article)) {
+    restorePlaceholderIfMissing(article);
+    return;
+  }
   observed.add(article);
   if (isFixtureHost()) {
     const postId = extractPostId(article);
@@ -294,12 +354,19 @@ function scan(root) {
 var mutationObserver = new MutationObserver((mutations) => {
   for (const mutation of mutations) {
     for (const node of mutation.addedNodes) {
+      if (isHtmlElement(node) && node.classList.contains(PLACEHOLDER_CLASS)) {
+        continue;
+      }
       if (isTweetArticle(node)) {
         observeTweet(node);
       }
       if ("querySelectorAll" in node) {
         scan(node);
       }
+    }
+    const target = mutation.target;
+    if (isHtmlElement(target) && isHidden(target)) {
+      restorePlaceholderIfMissing(target);
     }
   }
 });

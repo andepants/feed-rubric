@@ -1,16 +1,13 @@
 {
   "manifest_version": 3,
   "name": "feed-rubric",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "User-defined rubric categories. Jev noul scores each feed post; hide matches over your threshold.",
   "permissions": ["storage"],
-  "host_permissions": [
-    "https://x.com/*",
-    "https://twitter.com/*",
-    "https://api.typesafe.ai/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
-  ],
+  "host_permissions": ["https://api.typesafe.ai/*"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none';"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -20,8 +17,8 @@
       "matches": [
         "https://x.com/*",
         "https://twitter.com/*",
-        "http://127.0.0.1/*",
-        "http://localhost/*"
+        "http://127.0.0.1:8080/*",
+        "http://127.0.0.1:18080/*"
       ],
       "js": ["content.js"],
       "css": ["content.css"],

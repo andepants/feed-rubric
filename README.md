@@ -23,7 +23,7 @@ These are sent to `https://api.typesafe.ai/v1/systemone` over HTTPS from the ext
 
 ## BYOK — no shared key, no backend
 
-You supply your own TypeSafe API key in the options page. It is stored in `chrome.storage.local` and used **only** by the service worker. Content scripts never see the key. There is no hosted proxy and no shared key.
+You supply your own TypeSafe API key in the options page. It is stored in `chrome.storage.local` and used **only** by the service worker. Content scripts never receive the key and do not call `chrome.storage`. The page cannot read extension storage (isolated world). There is no hosted proxy and no shared key. See [SECURITY.md](SECURITY.md).
 
 ## Fail open
 
@@ -81,14 +81,15 @@ Open [http://127.0.0.1:8080/timeline.html](http://127.0.0.1:8080/timeline.html).
 ## Architecture
 
 ```
-content script (x.com + fixtures)
+content script (x.com + 127.0.0.1:8080/:18080 fixtures)
   → extract text + post id
-  → chrome.runtime.sendMessage
+  → chrome.runtime.sendMessage (no API key)
 service worker
+  → allowlist sender origin; drop spoofed fixture scores
   → cache (memory + chrome.storage.session, keyed by post + rubric hash)
   → rate limit (~40 calls/min, fail open over cap)
-  → POST Jev systemone (one call, one noul per enabled category)
-  → { hide, reasons, scores }
+  → POST Jev systemone from x.com senders only (credentials omitted)
+  → { hide, reasons, scores, debug }
 content script
   → slim placeholder + Undo, or leave visible
 ```
@@ -108,13 +109,15 @@ npm run fixture    # serve fixtures/ on :8080
 
 Source layout:
 
-- `src/jev.ts` — thin fetch wrapper for System One
+- `src/jev.ts` — thin fetch wrapper for System One (`credentials: "omit"`)
+- `src/origins.ts` / `src/messaging.ts` — classify origin allowlist
 - `src/categories.ts` — defaults, noul criteria, settings helpers
 - `src/sites/x.ts` — x.com DOM adapter (selector fallback chain, fail-open)
 - `src/score.ts` / `src/hide.ts` / `src/classify-plan.ts` — pure score, hide, and fail-open plan
+- `SECURITY.md` — threat model and mitigations
 - `extension/` — loadable unpacked extension (built artifacts)
 - `fixtures/timeline.html` — 8 fake tweets for local testing
-- `test/` — vitest unit/hide-loop
+- `test/` — vitest unit/hide-loop/security
 - `e2e/` — Playwright smoke with unpacked extension (CI, no X login)
 
 ## License

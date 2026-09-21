@@ -27,6 +27,12 @@ export function humanizeError(message: string): string {
       return "No TypeSafe API key — posts stay visible (fail open).";
     case "rate_limited":
       return "Rate limited (~40 calls/min) — posts stay visible (fail open).";
+    case "fixture_only":
+      return "Fixture host — live TypeSafe calls are disabled; posts stay visible without dry-run scores.";
+    case "invalid_post":
+      return "Ignored a malformed classify request (fail open).";
+    case "untrusted_sender":
+      return "Ignored a classify message from an unexpected origin (fail open).";
     default:
       return message;
   }
