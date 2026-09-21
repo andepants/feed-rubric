@@ -1,12 +1,27 @@
 import {
   DEFAULT_CATEGORIES,
   DEFAULT_THRESHOLD,
+  normalizeCategories,
+  parseCategory,
   type Category,
   type Settings,
 } from "./categories.js";
+import { formatLastError, LAST_ERROR_KEY, parseLastError } from "./last-error.js";
+import type { CacheClearedResponse } from "./types.js";
+import { isRecord } from "./guard.js";
+
+function inputEl(id: string): HTMLInputElement | null {
+  const el = document.getElementById(id);
+  return el instanceof HTMLInputElement ? el : null;
+}
+
+function elById(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
 
 function renderCategories(categories: Category[]): void {
-  const container = document.getElementById("categories")!;
+  const container = elById("categories");
+  if (!container) return;
   container.innerHTML = "";
 
   for (const cat of categories) {
@@ -22,7 +37,12 @@ function renderCategories(categories: Category[]): void {
           <span class="cat-id">${escapeHtml(cat.id)}</span>
         </label>
       </div>
-      <textarea class="cat-instructions" rows="3">${escapeHtml(cat.instructions)}</textarea>
+      <label class="field-label">Instructions (noul question)</label>
+      <textarea class="cat-instructions" rows="2">${escapeHtml(cat.instructions)}</textarea>
+      <label class="field-label">True</label>
+      <textarea class="cat-true" rows="2">${escapeHtml(cat.criteria.true)}</textarea>
+      <label class="field-label">False</label>
+      <textarea class="cat-false" rows="2">${escapeHtml(cat.criteria.false)}</textarea>
     `;
 
     container.appendChild(row);
@@ -39,16 +59,40 @@ function escapeHtml(text: string): string {
 
 function readCategories(): Category[] {
   const rows = document.querySelectorAll<HTMLElement>(".category-row");
-  return Array.from(rows).map((row) => {
-    const id = row.dataset.id!;
+  const parsed: Category[] = [];
+
+  for (const row of rows) {
+    const id = row.dataset.id;
+    if (!id) continue;
     const base = DEFAULT_CATEGORIES.find((c) => c.id === id);
-    return {
+    const enabledEl = row.querySelector(".cat-enabled");
+    const instructionsEl = row.querySelector(".cat-instructions");
+    const trueEl = row.querySelector(".cat-true");
+    const falseEl = row.querySelector(".cat-false");
+
+    const candidate = parseCategory({
       id,
       name: base?.name ?? id,
-      enabled: row.querySelector<HTMLInputElement>(".cat-enabled")!.checked,
-      instructions: row.querySelector<HTMLTextAreaElement>(".cat-instructions")!.value.trim(),
-    };
-  });
+      enabled: enabledEl instanceof HTMLInputElement ? enabledEl.checked : true,
+      instructions:
+        instructionsEl instanceof HTMLTextAreaElement ? instructionsEl.value.trim() : "",
+      criteria: {
+        true: trueEl instanceof HTMLTextAreaElement ? trueEl.value.trim() : "",
+        false: falseEl instanceof HTMLTextAreaElement ? falseEl.value.trim() : "",
+      },
+    });
+    if (candidate) parsed.push(candidate);
+  }
+
+  return parsed.length > 0 ? parsed : DEFAULT_CATEGORIES;
+}
+
+function renderLastError(value: unknown): void {
+  const node = elById("last-error");
+  if (!node) return;
+  const error = parseLastError(value);
+  node.textContent = formatLastError(error);
+  node.classList.toggle("has-error", error !== null);
 }
 
 async function loadForm(): Promise<void> {
@@ -57,48 +101,89 @@ async function loadForm(): Promise<void> {
     "threshold",
     "categories",
     "debug",
+    LAST_ERROR_KEY,
   ]);
 
-  (document.getElementById("apiKey") as HTMLInputElement).value =
-    typeof stored.apiKey === "string" ? stored.apiKey : "";
-  (document.getElementById("threshold") as HTMLInputElement).value = String(
-    typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD,
-  );
-  (document.getElementById("debug") as HTMLInputElement).checked =
-    stored.debug === true;
+  const apiKey = inputEl("apiKey");
+  const threshold = inputEl("threshold");
+  const debug = inputEl("debug");
+  if (apiKey) apiKey.value = typeof stored.apiKey === "string" ? stored.apiKey : "";
+  if (threshold) {
+    threshold.value = String(
+      typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD,
+    );
+  }
+  if (debug) debug.checked = stored.debug === true;
 
-  renderCategories(
-    Array.isArray(stored.categories) ? stored.categories : DEFAULT_CATEGORIES,
-  );
+  renderCategories(normalizeCategories(stored.categories));
+  renderLastError(stored[LAST_ERROR_KEY]);
 }
 
 async function saveForm(): Promise<void> {
-  const apiKey = (document.getElementById("apiKey") as HTMLInputElement).value.trim();
-  const threshold = parseFloat(
-    (document.getElementById("threshold") as HTMLInputElement).value,
-  );
-  const debug = (document.getElementById("debug") as HTMLInputElement).checked;
-  const categories = readCategories();
+  const apiKeyEl = inputEl("apiKey");
+  const thresholdEl = inputEl("threshold");
+  const debugEl = inputEl("debug");
+  if (!apiKeyEl || !thresholdEl || !debugEl) return;
 
+  const threshold = parseFloat(thresholdEl.value);
   const settings: Settings = {
-    apiKey,
+    apiKey: apiKeyEl.value.trim(),
     threshold: Number.isFinite(threshold) ? threshold : DEFAULT_THRESHOLD,
-    categories,
-    debug,
+    categories: readCategories(),
+    debug: debugEl.checked,
   };
 
   await chrome.storage.local.set(settings);
+  try {
+    await chrome.runtime.sendMessage({ type: "clearCache" });
+  } catch {
+    // Fail open: fingerprint in the cache key still isolates new settings.
+  }
 
-  const status = document.getElementById("save-status")!;
+  const status = elById("save-status");
+  if (!status) return;
   status.textContent = "Saved.";
   setTimeout(() => {
     status.textContent = "";
   }, 2000);
 }
 
+async function clearCache(): Promise<void> {
+  const status = elById("cache-status");
+  try {
+    const response: unknown = await chrome.runtime.sendMessage({ type: "clearCache" });
+    const cleared = readClearedCount(response);
+    if (status) {
+      status.textContent =
+        cleared === null ? "Cache clear sent." : `Cleared ${cleared} cached score(s).`;
+    }
+  } catch (err) {
+    if (status) {
+      status.textContent = err instanceof Error ? err.message : "Cache clear failed.";
+    }
+  }
+}
+
+function readClearedCount(response: unknown): number | null {
+  if (!isRecord(response)) return null;
+  if (response.type !== "cacheCleared") return null;
+  if (typeof response.cleared !== "number") return null;
+  const typed: CacheClearedResponse = {
+    type: "cacheCleared",
+    cleared: response.cleared,
+  };
+  return typed.cleared;
+}
+
 document.getElementById("save")?.addEventListener("click", () => void saveForm());
 document.getElementById("reset-categories")?.addEventListener("click", () => {
   renderCategories(DEFAULT_CATEGORIES);
+});
+document.getElementById("clear-cache")?.addEventListener("click", () => void clearCache());
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes[LAST_ERROR_KEY]) return;
+  renderLastError(changes[LAST_ERROR_KEY].newValue);
 });
 
 void loadForm();

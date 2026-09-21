@@ -5,3 +5,7 @@ dist/
 .env
 .env.*
 .agents/
+skills-lock.json
+playwright-report/
+test-results/
+blob-report/

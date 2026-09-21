@@ -1,4 +1,5 @@
 import type { Category } from "./categories.js";
+import { isRecord } from "./guard.js";
 
 export const JEV_MODEL = "jev-1.13.0";
 export const SYSTEMONE_URL = "https://api.typesafe.ai/v1/systemone";
@@ -16,25 +17,61 @@ export interface NoulAnswer {
   noul: number;
 }
 
+export interface NoulQuestion {
+  type: "noul";
+  instructions: string;
+  criteria: {
+    true: string;
+    false: string;
+  };
+}
+
 export interface SystemOneResponse {
   model: string;
   answers: Record<string, NoulAnswer>;
 }
 
-export function buildQuestions(categories: Category[]): Record<string, object> {
-  const questions: Record<string, object> = {};
+export function buildQuestions(categories: Category[]): Record<string, NoulQuestion> {
+  const questions: Record<string, NoulQuestion> = {};
   for (const cat of categories) {
     if (!cat.enabled) continue;
     questions[cat.id] = {
       type: "noul",
       instructions: cat.instructions,
       criteria: {
-        true: "The condition described in the instructions applies to this post.",
-        false: "The condition does not apply.",
+        true: cat.criteria.true,
+        false: cat.criteria.false,
       },
     };
   }
   return questions;
+}
+
+export function parseNoulAnswer(value: unknown): NoulAnswer | null {
+  if (!isRecord(value)) return null;
+  if (value.type !== "noul") return null;
+  if (typeof value.noul !== "number" || !Number.isFinite(value.noul)) return null;
+  return { type: "noul", noul: value.noul };
+}
+
+export function parseSystemOneResponse(value: unknown): SystemOneResponse {
+  if (!isRecord(value)) {
+    throw new Error("invalid_jev_response");
+  }
+
+  const answersRaw = value.answers;
+  if (!isRecord(answersRaw)) {
+    throw new Error("invalid_jev_answers");
+  }
+
+  const answers: Record<string, NoulAnswer> = {};
+  for (const [id, answer] of Object.entries(answersRaw)) {
+    const parsed = parseNoulAnswer(answer);
+    if (parsed) answers[id] = parsed;
+  }
+
+  const model = typeof value.model === "string" ? value.model : JEV_MODEL;
+  return { model, answers };
 }
 
 export async function classifyPost(
@@ -60,7 +97,8 @@ export async function classifyPost(
     throw new Error(`Jev API ${res.status}: ${await res.text()}`);
   }
 
-  return (await res.json()) as SystemOneResponse;
+  const payload: unknown = await res.json();
+  return parseSystemOneResponse(payload);
 }
 
 export function isConfidentYes(noul: number): boolean {

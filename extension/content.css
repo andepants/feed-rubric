@@ -1,24 +1,36 @@
-[data-feed-rubric-hide] {
+/* Collapse a hidden tweet to a slim row; never display:none the article
+   so Undo stays clickable. */
+[data-feed-rubric-hide] > *:not(.feed-rubric-placeholder) {
   display: none !important;
 }
 
-.feed-rubric-debug-chip {
-  all: unset;
+.feed-rubric-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   box-sizing: border-box;
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 10000;
-  max-width: 90%;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.55);
-  color: rgba(255, 255, 255, 0.85);
-  font: 11px/1.3 system-ui, sans-serif;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(127, 127, 127, 0.12);
+  color: #8b98a5;
+  font: 12px/1.35 system-ui, sans-serif;
+  pointer-events: auto;
+}
+
+.feed-rubric-undo {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid #8b98a5;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
   pointer-events: auto;
 }
 
-.feed-rubric-debug-chip:hover {
-  background: rgba(0, 0, 0, 0.75);
+.feed-rubric-undo:hover {
+  background: rgba(127, 127, 127, 0.18);
 }
