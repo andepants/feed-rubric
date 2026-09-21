@@ -62,9 +62,32 @@ test("options page shows noul criteria, last error, and cache clear", async ({
   await expect(page.locator("#clear-cache")).toBeVisible();
   await expect(page.locator(".cat-true")).toHaveCount(3);
   await expect(page.locator(".cat-false")).toHaveCount(3);
+  await expect(page.locator(".empty-state")).toHaveCount(0);
+  await page.locator("#save").click();
+  await expect(page.locator("#save-status")).toHaveText("Saved.");
+  await page.locator("#reset-categories").click();
+  await expect(page.locator("#save-status")).toContainText("click Save");
   await page.screenshot({
     path: testInfo.outputPath("options_runtime.png"),
     fullPage: true,
+  });
+});
+
+test("popup shows fail-open empty state without an API key", async ({
+  context,
+}, testInfo) => {
+  const [worker] = context.serviceWorkers();
+  expect(worker).toBeTruthy();
+  if (!worker) return;
+  const extensionId = new URL(worker.url()).host;
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/popup.html`);
+  await expect(page.locator("#status")).toHaveText(
+    "No API key — posts stay visible (fail open).",
+  );
+  await expect(page.locator("#open-options")).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("popup_empty_state.png"),
   });
 });
 

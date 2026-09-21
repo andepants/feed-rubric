@@ -3,6 +3,29 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/limits.ts
+var MAX_POST_TEXT_LENGTH = 4e3;
+var MAX_AUTHOR_LENGTH = 64;
+var MAX_ERROR_LENGTH = 280;
+var MAX_CATEGORY_FIELD_LENGTH = 2e3;
+var CLASSIFY_TIMEOUT_MS = 15e3;
+var POST_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+function clampText(value, max) {
+  if (value.length <= max) return value;
+  return value.slice(0, max);
+}
+function isValidPostId(postId) {
+  return POST_ID_RE.test(postId);
+}
+function clampThreshold(value) {
+  if (!Number.isFinite(value)) return 0.75;
+  return Math.min(1, Math.max(0, value));
+}
+function sanitizeErrorMessage(message) {
+  const redacted = message.replace(/Bearer\s+\S+/gi, "Bearer [redacted]").replace(/\bts_[A-Za-z0-9._-]+/gi, "[redacted]");
+  return clampText(redacted, MAX_ERROR_LENGTH);
+}
+
 // src/categories.ts
 var DEFAULT_THRESHOLD = 0.75;
 var FALLBACK_CRITERIA = {
@@ -46,8 +69,8 @@ function parseCriteria(value, fallback = FALLBACK_CRITERIA) {
   const trueText = value.true;
   const falseText = value.false;
   return {
-    true: typeof trueText === "string" && trueText.trim().length > 0 ? trueText : fallback.true,
-    false: typeof falseText === "string" && falseText.trim().length > 0 ? falseText : fallback.false
+    true: typeof trueText === "string" && trueText.trim().length > 0 ? clampText(trueText, MAX_CATEGORY_FIELD_LENGTH) : fallback.true,
+    false: typeof falseText === "string" && falseText.trim().length > 0 ? clampText(falseText, MAX_CATEGORY_FIELD_LENGTH) : fallback.false
   };
 }
 function parseCategory(value) {
@@ -60,9 +83,9 @@ function parseCategory(value) {
   if (typeof instructions !== "string") return null;
   const defaults = DEFAULT_CATEGORIES.find((cat) => cat.id === id);
   return {
-    id,
-    name,
-    instructions,
+    id: clampText(id, 64),
+    name: clampText(name, 80),
+    instructions: clampText(instructions, MAX_CATEGORY_FIELD_LENGTH),
     enabled: typeof value.enabled === "boolean" ? value.enabled : true,
     criteria: parseCriteria(value.criteria, defaults?.criteria ?? FALLBACK_CRITERIA)
   };
@@ -88,7 +111,7 @@ async function loadSettings() {
   ]);
   return {
     apiKey: typeof stored.apiKey === "string" ? stored.apiKey : "",
-    threshold: typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD,
+    threshold: typeof stored.threshold === "number" ? clampThreshold(stored.threshold) : DEFAULT_THRESHOLD,
     categories: normalizeCategories(stored.categories),
     debug: stored.debug === true
   };
@@ -117,11 +140,17 @@ function cacheKey(args) {
 
 // src/classify-plan.ts
 function planClassify(args) {
+  if (!args.validPost) {
+    return { kind: "fail_open", error: "invalid_post" };
+  }
   if (args.cached) {
     return { kind: "cache", result: args.cached };
   }
-  if (args.fixtureScores) {
+  if (args.allowFixture && args.fixtureScores) {
     return { kind: "fixture", scores: args.fixtureScores };
+  }
+  if (!args.allowApi) {
+    return { kind: "fail_open", error: "fixture_only" };
   }
   if (!args.hasApiKey) {
     return { kind: "fail_open", error: "no_api_key" };
@@ -184,10 +213,13 @@ async function classifyPost(apiKey, state, categories) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ state, model: JEV_MODEL, questions })
+    body: JSON.stringify({ state, model: JEV_MODEL, questions }),
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS)
   });
   if (!res.ok) {
-    throw new Error(`Jev API ${res.status}: ${await res.text()}`);
+    throw new Error(`Jev API ${res.status}`);
   }
   const payload = await res.json();
   return parseSystemOneResponse(payload);
@@ -198,6 +230,57 @@ function isConfidentYes(noul) {
 
 // src/last-error.ts
 var LAST_ERROR_KEY = "lastError";
+
+// src/origins.ts
+var CLASSIFY_ORIGINS = /* @__PURE__ */ new Set([
+  "https://x.com",
+  "https://twitter.com",
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:18080"
+]);
+var FIXTURE_ORIGINS = /* @__PURE__ */ new Set([
+  "http://127.0.0.1:8080",
+  "http://127.0.0.1:18080"
+]);
+function originOf(url) {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+function isAllowedClassifyOrigin(origin) {
+  return origin !== null && CLASSIFY_ORIGINS.has(origin);
+}
+function isFixtureOrigin(origin) {
+  return origin !== null && FIXTURE_ORIGINS.has(origin);
+}
+function isExtensionPageUrl(url, extensionId) {
+  if (!url || !extensionId) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "chrome-extension:" && parsed.hostname === extensionId;
+  } catch {
+    return false;
+  }
+}
+
+// src/messaging.ts
+function classifySenderOrigin(sender) {
+  return originOf(sender.url) ?? (sender.origin ? originOf(sender.origin) : null);
+}
+function isTrustedClassifySender(sender, extensionId) {
+  if (sender.id && sender.id !== extensionId) return false;
+  return isAllowedClassifyOrigin(classifySenderOrigin(sender));
+}
+function isFixtureSender(sender) {
+  return isFixtureOrigin(classifySenderOrigin(sender));
+}
+function isExtensionPageSender(sender, extensionId) {
+  if (sender.id && sender.id !== extensionId) return false;
+  return isExtensionPageUrl(sender.url, extensionId);
+}
 
 // src/rate-limit.ts
 var RATE_LIMIT = 40;
@@ -251,7 +334,10 @@ var CACHE_PREFIX = "feed-rubric:cache:";
 var memoryCache = /* @__PURE__ */ new Map();
 var callTimestamps = [];
 async function recordError(message) {
-  const lastError = { message, at: Date.now() };
+  const lastError = {
+    message: sanitizeErrorMessage(message),
+    at: Date.now()
+  };
   await chrome.storage.local.set({ [LAST_ERROR_KEY]: lastError });
 }
 async function readSessionCache(key) {
@@ -312,6 +398,9 @@ function takeRateLimitSlot(now) {
   callTimestamps.push(now);
   return true;
 }
+function withDebug(result, debug) {
+  return { ...result, debug };
+}
 async function handleClassify(req) {
   const settings = await loadSettings();
   const enabled = settings.categories.filter((c) => c.enabled);
@@ -329,17 +418,20 @@ async function handleClassify(req) {
   const plan = planClassify({
     cached,
     fixtureScores: parseScoreMap(req.fixtureScores),
+    allowFixture: req.allowFixture === true,
+    allowApi: req.allowApi !== false,
     hasApiKey: settings.apiKey.length > 0,
     rateLimited: isRateLimited({
       timestamps: callTimestamps,
       now: Date.now(),
       limit: RATE_LIMIT,
       windowMs: RATE_WINDOW_MS
-    })
+    }),
+    validPost: isValidPostId(req.postId)
   });
   switch (plan.kind) {
     case "cache":
-      return { ...plan.result, cached: true };
+      return withDebug({ ...plan.result, cached: true }, settings.debug);
     case "fixture": {
       const result = evaluateScores({
         scores: plan.scores,
@@ -347,18 +439,24 @@ async function handleClassify(req) {
         threshold: settings.threshold
       });
       await setCached(key, result);
-      return result;
+      return withDebug(result, settings.debug);
     }
     case "fail_open": {
       await recordError(plan.error);
-      return plan.error === "rate_limited" ? { ...failOpen(plan.error), rateLimited: true } : failOpen(plan.error);
+      if (plan.error === "rate_limited") {
+        return withDebug({ ...failOpen(plan.error), rateLimited: true }, settings.debug);
+      }
+      return withDebug(failOpen(plan.error), settings.debug);
     }
     case "api": {
-      const state = { author: req.author, text: req.text };
+      const state = {
+        author: clampText(req.author, MAX_AUTHOR_LENGTH),
+        text: clampText(req.text, MAX_POST_TEXT_LENGTH)
+      };
       try {
         if (!takeRateLimitSlot(Date.now())) {
           await recordError("rate_limited");
-          return { ...failOpen("rate_limited"), rateLimited: true };
+          return withDebug({ ...failOpen("rate_limited"), rateLimited: true }, settings.debug);
         }
         const response = await classifyPost(settings.apiKey, state, enabled);
         const scores = {};
@@ -371,22 +469,30 @@ async function handleClassify(req) {
           threshold: settings.threshold
         });
         await setCached(key, result);
-        return result;
+        return withDebug(result, settings.debug);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "unknown_error";
-        console.warn("[feed-rubric] classify failed:", err);
+        const message = sanitizeErrorMessage(
+          err instanceof Error ? err.message : "unknown_error"
+        );
+        console.warn("[feed-rubric] classify failed:", message);
         await recordError(message);
-        return failOpen(message);
+        return withDebug(failOpen(message), settings.debug);
       }
     }
     default: {
       const _exhaustive = plan;
-      return failOpen(`unhandled_plan:${String(_exhaustive)}`);
+      return withDebug(failOpen(`unhandled_plan:${String(_exhaustive)}`), settings.debug);
     }
   }
 }
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const extensionId = chrome.runtime.id;
   if (isClearCacheRequest(message)) {
+    if (!isExtensionPageSender(sender, extensionId)) {
+      const response = { type: "cacheCleared", cleared: 0 };
+      sendResponse(response);
+      return false;
+    }
     void clearCache().then((cleared) => {
       const response = { type: "cacheCleared", cleared };
       sendResponse(response);
@@ -397,7 +503,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
   if (!isClassifyRequest(message)) return false;
-  handleClassify(message).then((result) => {
+  const trusted = isTrustedClassifySender(sender, extensionId);
+  const fixtureSender = isFixtureSender(sender);
+  const request = {
+    ...message,
+    author: clampText(message.author, MAX_AUTHOR_LENGTH),
+    text: clampText(message.text, MAX_POST_TEXT_LENGTH),
+    fixtureScores: fixtureSender ? message.fixtureScores : void 0,
+    allowFixture: fixtureSender,
+    allowApi: trusted && !fixtureSender
+  };
+  if (!trusted) {
+    sendResponse({
+      type: "classifyResult",
+      postId: message.postId,
+      result: failOpen("untrusted_sender")
+    });
+    return false;
+  }
+  handleClassify(request).then((result) => {
     const response = {
       type: "classifyResult",
       postId: message.postId,
@@ -408,7 +532,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({
       type: "classifyResult",
       postId: message.postId,
-      result: failOpen(err instanceof Error ? err.message : "unknown_error")
+      result: failOpen(
+        sanitizeErrorMessage(err instanceof Error ? err.message : "unknown_error")
+      )
     });
   });
   return true;

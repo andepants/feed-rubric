@@ -187,5 +187,6 @@ describe("placeholder row", () => {
     expect(isHidden(article)).toBe(true);
     expect(article.querySelector(`.${UNDO_CLASS}`)?.textContent).toBe("Undo");
     expect(article.textContent).toMatch(/Hidden · rage_bait/);
+    expect(article.querySelector(".feed-rubric-placeholder img")).toBeNull();
   });
 });

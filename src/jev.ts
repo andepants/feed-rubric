@@ -1,5 +1,6 @@
 import type { Category } from "./categories.js";
 import { isRecord } from "./guard.js";
+import { CLASSIFY_TIMEOUT_MS } from "./limits.js";
 
 export const JEV_MODEL = "jev-1.13.0";
 export const SYSTEMONE_URL = "https://api.typesafe.ai/v1/systemone";
@@ -91,10 +92,13 @@ export async function classifyPost(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ state, model: JEV_MODEL, questions }),
+    credentials: "omit",
+    referrerPolicy: "no-referrer",
+    signal: AbortSignal.timeout(CLASSIFY_TIMEOUT_MS),
   });
 
   if (!res.ok) {
-    throw new Error(`Jev API ${res.status}: ${await res.text()}`);
+    throw new Error(`Jev API ${res.status}`);
   }
 
   const payload: unknown = await res.json();

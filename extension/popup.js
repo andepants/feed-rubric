@@ -1,14 +1,5 @@
-// src/guard.ts
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // src/categories.ts
 var DEFAULT_THRESHOLD = 0.75;
-var FALLBACK_CRITERIA = {
-  true: "The condition described in the instructions applies to this post.",
-  false: "The condition does not apply."
-};
 var DEFAULT_CATEGORIES = [
   {
     id: "rage_bait",
@@ -41,65 +32,28 @@ var DEFAULT_CATEGORIES = [
     }
   }
 ];
-function parseCriteria(value, fallback = FALLBACK_CRITERIA) {
-  if (!isRecord(value)) return fallback;
-  const trueText = value.true;
-  const falseText = value.false;
-  return {
-    true: typeof trueText === "string" && trueText.trim().length > 0 ? trueText : fallback.true,
-    false: typeof falseText === "string" && falseText.trim().length > 0 ? falseText : fallback.false
-  };
-}
-function parseCategory(value) {
-  if (!isRecord(value)) return null;
-  const id = value.id;
-  const name = value.name;
-  const instructions = value.instructions;
-  if (typeof id !== "string" || id.length === 0) return null;
-  if (typeof name !== "string" || name.length === 0) return null;
-  if (typeof instructions !== "string") return null;
-  const defaults = DEFAULT_CATEGORIES.find((cat) => cat.id === id);
-  return {
-    id,
-    name,
-    instructions,
-    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
-    criteria: parseCriteria(value.criteria, defaults?.criteria ?? FALLBACK_CRITERIA)
-  };
-}
-function normalizeCategories(value) {
-  if (!Array.isArray(value)) return DEFAULT_CATEGORIES;
-  const parsed = [];
-  for (const item of value) {
-    const cat = parseCategory(item);
-    if (cat) parsed.push(cat);
-  }
-  return parsed.length > 0 ? parsed : DEFAULT_CATEGORIES;
-}
-async function loadSettings() {
-  const stored = await chrome.storage.local.get([
-    "apiKey",
-    "threshold",
-    "categories",
-    "debug"
-  ]);
-  return {
-    apiKey: typeof stored.apiKey === "string" ? stored.apiKey : "",
-    threshold: typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD,
-    categories: normalizeCategories(stored.categories),
-    debug: stored.debug === true
-  };
-}
 
 // src/popup.ts
 async function init() {
-  const settings = await loadSettings();
   const status = document.getElementById("status");
-  const enabled = settings.categories.filter((c) => c.enabled).length;
-  if (!settings.apiKey) {
-    status.textContent = "No API key \u2014 posts stay visible (fail open).";
-  } else {
-    status.textContent = `${enabled} categories \xB7 threshold ${settings.threshold}`;
+  if (!status) return;
+  try {
+    const stored = await chrome.storage.local.get(["apiKey", "threshold", "categories"]);
+    const hasKey = typeof stored.apiKey === "string" && stored.apiKey.length > 0;
+    const threshold = typeof stored.threshold === "number" ? stored.threshold : DEFAULT_THRESHOLD;
+    const categories = Array.isArray(stored.categories) ? stored.categories : DEFAULT_CATEGORIES;
+    const enabled = categories.filter((c) => {
+      return typeof c === "object" && c !== null && "enabled" in c && c.enabled === true;
+    }).length;
+    if (!hasKey) {
+      status.textContent = "No API key \u2014 posts stay visible (fail open).";
+    } else if (enabled === 0) {
+      status.textContent = "No categories enabled \u2014 nothing will hide.";
+    } else {
+      status.textContent = `${enabled} categories \xB7 threshold ${threshold}`;
+    }
+  } catch {
+    status.textContent = "Could not load settings. Open options to retry.";
   }
   document.getElementById("open-options")?.addEventListener("click", () => {
     chrome.runtime.openOptionsPage();

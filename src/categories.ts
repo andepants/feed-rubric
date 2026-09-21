@@ -1,4 +1,5 @@
 import { isRecord } from "./guard.js";
+import { clampText, clampThreshold, MAX_CATEGORY_FIELD_LENGTH } from "./limits.js";
 
 export interface NoulCriteria {
   true: string;
@@ -86,11 +87,11 @@ export function parseCriteria(
   return {
     true:
       typeof trueText === "string" && trueText.trim().length > 0
-        ? trueText
+        ? clampText(trueText, MAX_CATEGORY_FIELD_LENGTH)
         : fallback.true,
     false:
       typeof falseText === "string" && falseText.trim().length > 0
-        ? falseText
+        ? clampText(falseText, MAX_CATEGORY_FIELD_LENGTH)
         : fallback.false,
   };
 }
@@ -106,9 +107,9 @@ export function parseCategory(value: unknown): Category | null {
 
   const defaults = DEFAULT_CATEGORIES.find((cat) => cat.id === id);
   return {
-    id,
-    name,
-    instructions,
+    id: clampText(id, 64),
+    name: clampText(name, 80),
+    instructions: clampText(instructions, MAX_CATEGORY_FIELD_LENGTH),
     enabled: typeof value.enabled === "boolean" ? value.enabled : true,
     criteria: parseCriteria(value.criteria, defaults?.criteria ?? FALLBACK_CRITERIA),
   };
@@ -140,7 +141,7 @@ export async function loadSettings(): Promise<Settings> {
     apiKey: typeof stored.apiKey === "string" ? stored.apiKey : "",
     threshold:
       typeof stored.threshold === "number"
-        ? stored.threshold
+        ? clampThreshold(stored.threshold)
         : DEFAULT_THRESHOLD,
     categories: normalizeCategories(stored.categories),
     debug: stored.debug === true,
